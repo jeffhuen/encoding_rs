@@ -25,7 +25,6 @@ defmodule EncodingRs.Native do
   def encode_dirty(_string, _encoding), do: :erlang.nif_error(:nif_not_loaded)
 
   # Utility functions
-  def dirty_threshold, do: :erlang.nif_error(:nif_not_loaded)
   def encoding_exists(_encoding), do: :erlang.nif_error(:nif_not_loaded)
   def canonical_name(_encoding), do: :erlang.nif_error(:nif_not_loaded)
   def list_encodings, do: :erlang.nif_error(:nif_not_loaded)
@@ -37,4 +36,8 @@ defmodule EncodingRs.Native do
 
   def decoder_decode_chunk_dirty(_decoder, _chunk, _is_last),
     do: :erlang.nif_error(:nif_not_loaded)
+
+  # Batch operations
+  def decode_batch(_items), do: :erlang.nif_error(:nif_not_loaded)
+  def encode_batch(_items), do: :erlang.nif_error(:nif_not_loaded)
 end

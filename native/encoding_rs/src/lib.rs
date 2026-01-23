@@ -42,9 +42,6 @@ pub struct DecoderResource {
     decoder: Mutex<encoding_rs::Decoder>,
 }
 
-/// Threshold for using dirty schedulers (64KB)
-const DIRTY_THRESHOLD: usize = 64 * 1024;
-
 /// Decodes a binary from the specified encoding to a UTF-8 string.
 ///
 /// Uses dirty CPU scheduler for binaries larger than 64KB to avoid
@@ -122,13 +119,6 @@ fn encode_impl<'a>(env: Env<'a>, in_str: &str, enc: &str) -> NifResult<(Atom, Bi
             Ok((atoms::error(), bin.release(env)))
         }
     }
-}
-
-/// Returns the dirty threshold size in bytes.
-/// Binaries/strings larger than this will use dirty schedulers.
-#[rustler::nif]
-fn dirty_threshold() -> usize {
-    DIRTY_THRESHOLD
 }
 
 /// Checks if an encoding label is valid/supported.
@@ -209,6 +199,72 @@ fn list_encodings() -> Vec<&'static str> {
         "UTF-16LE",
         "x-user-defined",
     ]
+}
+
+// =============================================================================
+// Batch Operations
+// =============================================================================
+
+/// Decodes multiple binaries in a single NIF call.
+///
+/// This amortizes NIF dispatch overhead when processing many items,
+/// making it more efficient than calling `decode` repeatedly.
+///
+/// Always uses dirty CPU scheduler since batch operations are typically
+/// used for throughput-focused workloads.
+///
+/// ## Arguments
+/// * `items` - List of `{binary, encoding}` tuples to decode
+///
+/// ## Returns
+/// List of `{:ok, string}` or `{:error, :unknown_encoding}` tuples,
+/// in the same order as the input.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn decode_batch(items: Vec<(Binary, &str)>) -> Vec<(Atom, String)> {
+    items
+        .into_iter()
+        .map(|(binary, enc)| match Encoding::for_label(enc.as_bytes()) {
+            Some(encoding) => {
+                let (decoded, _, _had_errors) = encoding.decode(binary.as_slice());
+                (atoms::ok(), decoded.into_owned())
+            }
+            None => (atoms::error(), "unknown_encoding".to_string()),
+        })
+        .collect()
+}
+
+/// Encodes multiple strings in a single NIF call.
+///
+/// This amortizes NIF dispatch overhead when processing many items,
+/// making it more efficient than calling `encode` repeatedly.
+///
+/// Always uses dirty CPU scheduler since batch operations are typically
+/// used for throughput-focused workloads.
+///
+/// ## Arguments
+/// * `env` - The Erlang environment
+/// * `items` - List of `{string, encoding}` tuples to encode
+///
+/// ## Returns
+/// List of `{:ok, binary}` or `{:error, :unknown_encoding}` tuples,
+/// in the same order as the input.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn encode_batch<'a>(env: Env<'a>, items: Vec<(&str, &str)>) -> Vec<(Atom, Binary<'a>)> {
+    items
+        .into_iter()
+        .map(|(in_str, enc)| match Encoding::for_label(enc.as_bytes()) {
+            Some(encoding) => {
+                let (encoded, _, _had_errors) = encoding.encode(in_str);
+                let mut bin = OwnedBinary::new(encoded.len()).unwrap();
+                bin.as_mut_slice().write_all(&encoded).unwrap();
+                (atoms::ok(), bin.release(env))
+            }
+            None => {
+                let bin = OwnedBinary::new(0).unwrap();
+                (atoms::error(), bin.release(env))
+            }
+        })
+        .collect()
 }
 
 // =============================================================================

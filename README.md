@@ -1,43 +1,67 @@
 # EncodingRs
 
-High-performance character encoding/decoding for Elixir, powered by Rust's [encoding_rs](https://crates.io/crates/encoding_rs) library.
+Character encoding and decoding for Elixir. Convert text between UTF-8 and legacy encodings like Shift_JIS, GBK, Big5, EUC-KR, Windows-1252, and 200+ others.
 
-## Why This Fork?
+Powered by Rust's [encoding_rs](https://crates.io/crates/encoding_rs) - the same encoding library used by Firefox.
 
-This is a fork of [excoding](https://github.com/elixir-ecto/excoding) that replaces the underlying Rust `encoding` crate with `encoding_rs` - the same battle-tested encoding library used by Firefox.
+## Use Cases
 
-### Key Improvements
-
-| Feature | Original excoding | EncodingRs |
-|---------|-------------------|------------|
-| **Rust backend** | `encoding` crate (unmaintained since 2018) | `encoding_rs` (actively maintained, used by Firefox) |
-| **Performance** | Good | ~2-3x faster for large files |
-| **Streaming** | Not supported | `EncodingRs.Decoder` for chunked data |
-| **BOM detection** | Not supported | `detect_bom/1`, `detect_and_strip_bom/1` |
-| **Precompiled** | No | Yes, for 10 platforms |
-
-### Why encoding_rs?
-
-- **Battle-tested**: Powers Firefox's character encoding - billions of page loads
-- **WHATWG compliant**: Implements the [Encoding Standard](https://encoding.spec.whatwg.org/) used by all browsers
-- **Performance**: SIMD-optimized, faster than most encoding libraries
-- **Maintained**: Active development by Mozilla engineers
+- **Processing Japanese text files** - Shift_JIS, EUC-JP, ISO-2022-JP
+- **Processing Chinese text files** - GBK, GB18030, Big5, HZ
+- **Processing Korean text files** - EUC-KR
+- **Importing legacy data** - Windows-1252, ISO-8859-1, legacy code pages
+- **Web scraping non-UTF-8 sites** - decode HTML in any encoding
+- **Converting file encodings** - batch convert legacy files to UTF-8
+- **Reading CSV/text with mixed encodings** - detect and decode automatically
 
 ## Supported Encodings
 
-- **Unicode**: UTF-8, UTF-16LE, UTF-16BE
-- **Legacy Western**: Windows-1252, ISO-8859-1 through ISO-8859-16
-- **Asian**: Shift_JIS, EUC-JP, ISO-2022-JP, EUC-KR, GBK, GB18030, Big5
-- **Other**: Windows code pages (874, 1250-1258), KOI8-R/U, and more
+**Japanese**: Shift_JIS, EUC-JP, ISO-2022-JP
 
-See the full list at [encoding.spec.whatwg.org](https://encoding.spec.whatwg.org/#names-and-labels).
+**Chinese**: GBK, GB18030, Big5, HZ
+
+**Korean**: EUC-KR
+
+**Unicode**: UTF-8, UTF-16LE, UTF-16BE
+
+**Western European**: Windows-1252, ISO-8859-1, ISO-8859-15, macintosh
+
+**Central/Eastern European**: Windows-1250, ISO-8859-2, Windows-1257
+
+**Cyrillic**: Windows-1251, KOI8-R, KOI8-U, ISO-8859-5, x-mac-cyrillic
+
+**Greek**: Windows-1253, ISO-8859-7
+
+**Turkish**: Windows-1254, ISO-8859-9
+
+**Hebrew**: Windows-1255, ISO-8859-8
+
+**Arabic**: Windows-1256, ISO-8859-6
+
+**Vietnamese**: Windows-1258
+
+**Thai**: Windows-874
+
+**Baltic**: ISO-8859-4, ISO-8859-13
+
+And more - see the full list at [encoding.spec.whatwg.org](https://encoding.spec.whatwg.org/#names-and-labels).
+
+## Features
+
+- **High performance** - SIMD-optimized Rust NIF, 2-3x faster than pure Elixir alternatives
+- **Batch processing** - encode/decode multiple items in a single NIF call for throughput
+- **Streaming decoder** - handle large files and chunked data without corrupting multibyte characters
+- **BOM detection** - automatically detect UTF-8, UTF-16LE, UTF-16BE from byte order marks
+- **WHATWG compliant** - implements the [Encoding Standard](https://encoding.spec.whatwg.org/) used by browsers
+- **Precompiled binaries** - no Rust toolchain required for common platforms
+- **Dirty schedulers** - configurable threshold for offloading large operations (default 64KB)
 
 ## Installation
 
 ```elixir
 def deps do
   [
-    {:encoding_rs, "~> 0.2"}
+    {:encoding_rs, "~> 0.1"}
   ]
 end
 ```
@@ -104,9 +128,44 @@ Detect encoding from a Byte Order Mark (BOM) at the start of a file:
 {:ok, decoded} = EncodingRs.decode(data_without_bom, encoding)
 ```
 
+### Batch Processing
+
+For processing many items efficiently, use batch operations to amortize NIF dispatch overhead:
+
+```elixir
+# Decode multiple binaries in one call
+items = [
+  {<<72, 101, 108, 108, 111>>, "windows-1252"},
+  {<<0x82, 0xA0>>, "shift_jis"}
+]
+results = EncodingRs.decode_batch(items)
+# => [{:ok, "Hello"}, {:ok, "あ"}]
+
+# Encode multiple strings in one call
+items = [{"Hello", "windows-1252"}, {"あ", "shift_jis"}]
+results = EncodingRs.encode_batch(items)
+# => [{:ok, "Hello"}, {:ok, <<130, 160>>}]
+```
+
+See the [Batch Processing Guide](guides/batch.md) for more details.
+
 ## Dirty Schedulers
 
-Operations on binaries larger than 64KB automatically use dirty CPU schedulers to avoid blocking the BEAM.
+The BEAM VM has a limited number of normal schedulers, and long-running NIFs can block them, causing latency for other processes. Operations on binaries larger than the configured threshold automatically use dirty CPU schedulers, keeping the normal schedulers available for other work.
+
+The default threshold is 64KB. You can configure it in your `config.exs`:
+
+```elixir
+# Using multiplication for readability
+config :encoding_rs, dirty_threshold: 128 * 1024
+
+# Or using Elixir's underscore notation
+config :encoding_rs, dirty_threshold: 131_072
+```
+
+**Increasing the threshold** reduces context switching overhead, which benefits batch processing and throughput-focused workloads. However, larger operations will block normal schedulers longer, potentially causing latency for other processes.
+
+**Decreasing the threshold** keeps normal schedulers more available, which benefits latency-sensitive and high-concurrency applications. However, more frequent context switching adds overhead that may reduce throughput.
 
 ## Migrating from excoding
 

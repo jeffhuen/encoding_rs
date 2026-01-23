@@ -53,6 +53,8 @@ defmodule EncodingRs.Decoder do
 
   alias EncodingRs.Native
 
+  @dirty_threshold Application.compile_env(:encoding_rs, :dirty_threshold, 64 * 1024)
+
   @typedoc "An opaque decoder reference. Created with `new/1`."
   @type t :: reference()
 
@@ -148,7 +150,7 @@ defmodule EncodingRs.Decoder do
   @spec decode_chunk(t(), binary(), boolean()) :: decode_result()
   def decode_chunk(decoder, chunk, is_last \\ false)
       when is_reference(decoder) and is_binary(chunk) and is_boolean(is_last) do
-    if byte_size(chunk) > Native.dirty_threshold() do
+    if byte_size(chunk) > @dirty_threshold do
       Native.decoder_decode_chunk_dirty(decoder, chunk, is_last)
     else
       Native.decoder_decode_chunk(decoder, chunk, is_last)

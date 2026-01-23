@@ -34,6 +34,7 @@ encoding_rs-*.tar
 
 # Claude Code
 .claude/
+CLAUDE.md
 
 # Dialyzer PLTs
 /_build/plts/

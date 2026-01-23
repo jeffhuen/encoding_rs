@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.2.0 (2026-01-22)
+
+### Added
+
+- **Batch processing API** - Process multiple items in a single NIF call for improved throughput
+  - `EncodingRs.decode_batch/1` - Decode multiple `{binary, encoding}` tuples
+  - `EncodingRs.encode_batch/1` - Encode multiple `{string, encoding}` tuples
+  - Always uses dirty CPU schedulers (see [Batch Processing Guide](guides/batch.md))
+
+- **Configurable dirty threshold** - The threshold for switching to dirty schedulers is now configurable via `config.exs`:
+  ```elixir
+  config :encoding_rs, dirty_threshold: 128 * 1024
+  ```
+  Default remains 64KB. See documentation for guidance on increasing vs decreasing.
+
+### Documentation
+
+- Added [Batch Processing Guide](guides/batch.md) with usage examples, performance tips, and known limitations
+
 ## v0.1.0 (2026-01-22)
 
 Initial release of `encoding_rs`, a fork of [excoding](https://github.com/elixir-ecto/excoding) with significant improvements.

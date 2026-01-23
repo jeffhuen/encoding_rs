@@ -213,6 +213,168 @@ defmodule EncodingRsTest do
     end
   end
 
+  describe "decode_batch/1" do
+    test "decodes multiple items in single call" do
+      items = [
+        {<<72, 101, 108, 108, 111>>, "windows-1252"},
+        {<<0x82, 0xA0>>, "shift_jis"},
+        {<<0xC4, 0xE3, 0xBA, 0xC3>>, "gbk"}
+      ]
+
+      results = EncodingRs.decode_batch(items)
+
+      assert [
+               {:ok, "Hello"},
+               {:ok, "あ"},
+               {:ok, "你好"}
+             ] = results
+    end
+
+    test "handles mixed success and error results" do
+      items = [
+        {<<72, 101, 108, 108, 111>>, "windows-1252"},
+        {<<1, 2, 3>>, "invalid-encoding"},
+        {<<0x82, 0xA0>>, "shift_jis"}
+      ]
+
+      results = EncodingRs.decode_batch(items)
+
+      assert [
+               {:ok, "Hello"},
+               {:error, :unknown_encoding},
+               {:ok, "あ"}
+             ] = results
+    end
+
+    test "preserves order of results" do
+      items = [
+        {<<65>>, "utf-8"},
+        {<<66>>, "utf-8"},
+        {<<67>>, "utf-8"},
+        {<<68>>, "utf-8"}
+      ]
+
+      results = EncodingRs.decode_batch(items)
+
+      assert [{:ok, "A"}, {:ok, "B"}, {:ok, "C"}, {:ok, "D"}] = results
+    end
+
+    test "handles empty list" do
+      assert [] = EncodingRs.decode_batch([])
+    end
+
+    test "handles single item" do
+      items = [{<<72, 101, 108, 108, 111>>, "utf-8"}]
+      assert [{:ok, "Hello"}] = EncodingRs.decode_batch(items)
+    end
+
+    test "handles different encodings per item" do
+      items = [
+        {<<0xC0>>, "windows-1252"},
+        {<<0xC0>>, "iso-8859-1"},
+        {<<0xC0>>, "windows-1251"}
+      ]
+
+      results = EncodingRs.decode_batch(items)
+
+      # Same byte decodes differently in each encoding
+      assert [{:ok, "À"}, {:ok, "À"}, {:ok, "А"}] = results
+    end
+  end
+
+  describe "encode_batch/1" do
+    test "encodes multiple items in single call" do
+      items = [
+        {"Hello", "windows-1252"},
+        {"あ", "shift_jis"},
+        {"你好", "gbk"}
+      ]
+
+      results = EncodingRs.encode_batch(items)
+
+      assert [
+               {:ok, "Hello"},
+               {:ok, <<130, 160>>},
+               {:ok, <<196, 227, 186, 195>>}
+             ] = results
+    end
+
+    test "handles mixed success and error results" do
+      items = [
+        {"Hello", "windows-1252"},
+        {"test", "invalid-encoding"},
+        {"あ", "shift_jis"}
+      ]
+
+      results = EncodingRs.encode_batch(items)
+
+      assert [
+               {:ok, "Hello"},
+               {:error, :unknown_encoding},
+               {:ok, <<130, 160>>}
+             ] = results
+    end
+
+    test "preserves order of results" do
+      items = [
+        {"A", "utf-8"},
+        {"B", "utf-8"},
+        {"C", "utf-8"},
+        {"D", "utf-8"}
+      ]
+
+      results = EncodingRs.encode_batch(items)
+
+      assert [{:ok, "A"}, {:ok, "B"}, {:ok, "C"}, {:ok, "D"}] = results
+    end
+
+    test "handles empty list" do
+      assert [] = EncodingRs.encode_batch([])
+    end
+
+    test "handles single item" do
+      items = [{"Hello", "utf-8"}]
+      assert [{:ok, "Hello"}] = EncodingRs.encode_batch(items)
+    end
+  end
+
+  describe "batch roundtrip" do
+    test "encode_batch then decode_batch returns original" do
+      original_strings = ["Hello", "World", "こんにちは", "你好"]
+      encoding = "utf-8"
+
+      encode_items = Enum.map(original_strings, &{&1, encoding})
+      encode_results = EncodingRs.encode_batch(encode_items)
+
+      decode_items =
+        encode_results
+        |> Enum.map(fn {:ok, binary} -> {binary, encoding} end)
+
+      decode_results = EncodingRs.decode_batch(decode_items)
+
+      decoded_strings = Enum.map(decode_results, fn {:ok, s} -> s end)
+
+      assert decoded_strings == original_strings
+    end
+
+    test "batch results match individual calls" do
+      items = [
+        {<<72, 101, 108, 108, 111>>, "windows-1252"},
+        {<<0x82, 0xA0>>, "shift_jis"},
+        {<<1, 2, 3>>, "invalid-encoding"}
+      ]
+
+      batch_results = EncodingRs.decode_batch(items)
+
+      individual_results =
+        Enum.map(items, fn {binary, encoding} ->
+          EncodingRs.decode(binary, encoding)
+        end)
+
+      assert batch_results == individual_results
+    end
+  end
+
   describe "BOM detection integration" do
     test "detect BOM and decode file content" do
       # Simulate a UTF-8 file with BOM

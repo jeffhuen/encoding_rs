@@ -9,10 +9,36 @@ defmodule EncodingRs do
   ## Features
 
   - **High performance**: Uses `encoding_rs`, the same library used by Firefox
-  - **Dirty schedulers**: Large binaries (>64KB) automatically use dirty CPU
-    schedulers to avoid blocking the BEAM
+  - **Dirty schedulers**: Large binaries automatically use dirty CPU schedulers
+    to avoid blocking the BEAM (configurable threshold, default 64KB)
   - **Safe error handling**: Returns `{:ok, result}` or `{:error, reason}` tuples
   - **WHATWG compliant**: Supports all encodings from the WHATWG Encoding Standard
+
+  ## Configuration
+
+  The dirty scheduler threshold controls when operations are moved to dirty CPU
+  schedulers. The BEAM VM has a limited number of normal schedulers, and long-running
+  NIFs can block them, causing latency for other processes. By offloading large
+  encoding/decoding operations to dirty schedulers, the normal schedulers remain
+  available for other work.
+
+  Configure in your `config.exs`:
+
+      # Using multiplication for readability
+      config :encoding_rs, dirty_threshold: 128 * 1024
+
+      # Or using Elixir's underscore notation
+      config :encoding_rs, dirty_threshold: 131_072
+
+  The default is 64KB (65,536 bytes).
+
+  **Increasing the threshold** reduces context switching overhead, which benefits
+  batch processing and throughput-focused workloads. However, larger operations
+  will block normal schedulers longer, potentially causing latency for other processes.
+
+  **Decreasing the threshold** keeps normal schedulers more available, which benefits
+  latency-sensitive and high-concurrency applications. However, more frequent context
+  switching adds overhead that may reduce throughput.
 
   ## Supported Encodings
 
@@ -48,6 +74,9 @@ defmodule EncodingRs do
 
   alias EncodingRs.Native
 
+  # Configuration
+  @dirty_threshold Application.compile_env(:encoding_rs, :dirty_threshold, 64 * 1024)
+
   # Types
 
   @typedoc """
@@ -72,7 +101,8 @@ defmodule EncodingRs do
   Returns `{:ok, binary}` on success, or `{:error, reason}` on failure.
   Unmappable characters are replaced with a suitable fallback character.
 
-  Automatically uses dirty CPU schedulers for strings larger than 64KB.
+  Automatically uses dirty CPU schedulers for strings larger than the
+  configured threshold (see `dirty_threshold/0`).
 
   ## Examples
 
@@ -84,7 +114,7 @@ defmodule EncodingRs do
   """
   @spec encode(String.t(), encoding()) :: {:ok, binary()} | {:error, :unknown_encoding}
   def encode(string, encoding) when is_binary(string) and is_binary(encoding) do
-    if byte_size(string) > Native.dirty_threshold() do
+    if byte_size(string) > @dirty_threshold do
       case Native.encode_dirty(string, encoding) do
         {:ok, binary} -> {:ok, binary}
         {:error, _} -> {:error, :unknown_encoding}
@@ -124,7 +154,8 @@ defmodule EncodingRs do
   Returns `{:ok, string}` on success, or `{:error, reason}` on failure.
   Unmappable bytes are replaced with the Unicode replacement character (U+FFFD).
 
-  Automatically uses dirty CPU schedulers for binaries larger than 64KB.
+  Automatically uses dirty CPU schedulers for binaries larger than the
+  configured threshold (see `dirty_threshold/0`).
 
   ## Examples
 
@@ -136,7 +167,7 @@ defmodule EncodingRs do
   """
   @spec decode(binary(), encoding()) :: {:ok, String.t()} | {:error, :unknown_encoding}
   def decode(binary, encoding) when is_binary(binary) and is_binary(encoding) do
-    if byte_size(binary) > Native.dirty_threshold() do
+    if byte_size(binary) > @dirty_threshold do
       case Native.decode_dirty(binary, encoding) do
         {:ok, string} -> {:ok, string}
         {:error, _} -> {:error, :unknown_encoding}
@@ -234,7 +265,19 @@ defmodule EncodingRs do
   Returns the threshold (in bytes) above which dirty schedulers are used.
 
   Encode/decode operations on binaries larger than this threshold will
-  automatically use dirty CPU schedulers to avoid blocking the BEAM.
+  automatically use dirty CPU schedulers to avoid blocking the BEAM's normal
+  schedulers. This prevents long-running encoding operations from causing
+  latency for other processes.
+
+  This value can be configured in your `config.exs`:
+
+      # Using multiplication for readability
+      config :encoding_rs, dirty_threshold: 128 * 1024
+
+      # Or using Elixir's underscore notation
+      config :encoding_rs, dirty_threshold: 131_072
+
+  The default is 64KB (65,536 bytes).
 
   ## Examples
 
@@ -243,7 +286,94 @@ defmodule EncodingRs do
   """
   @spec dirty_threshold() :: non_neg_integer()
   def dirty_threshold do
-    Native.dirty_threshold()
+    @dirty_threshold
+  end
+
+  # Batch operations
+
+  @typedoc "Input item for batch decoding: `{binary, encoding}`"
+  @type decode_batch_item :: {binary(), encoding()}
+
+  @typedoc "Input item for batch encoding: `{string, encoding}`"
+  @type encode_batch_item :: {String.t(), encoding()}
+
+  @typedoc "Result from batch operations"
+  @type batch_result(t) :: {:ok, t} | {:error, :unknown_encoding}
+
+  @doc """
+  Decodes multiple binaries in a single NIF call.
+
+  This is more efficient than calling `decode/2` repeatedly when processing
+  many items, as it amortizes the NIF dispatch overhead.
+
+  Results are returned in the same order as the input items.
+
+  **Note:** Batch operations always use dirty CPU schedulers, regardless of
+  input size. See the [Batch Processing Guide](batch.md) for details.
+
+  ## Arguments
+
+  - `items` - List of `{binary, encoding}` tuples to decode
+
+  ## Returns
+
+  List of `{:ok, string}` or `{:error, :unknown_encoding}` tuples.
+
+  ## Examples
+
+      iex> items = [{<<72, 101, 108, 108, 111>>, "windows-1252"}, {<<0x82, 0xA0>>, "shift_jis"}]
+      iex> EncodingRs.decode_batch(items)
+      [{:ok, "Hello"}, {:ok, "あ"}]
+
+      iex> EncodingRs.decode_batch([{<<72>>, "invalid-encoding"}])
+      [{:error, :unknown_encoding}]
+  """
+  @spec decode_batch([decode_batch_item()]) :: [batch_result(String.t())]
+  def decode_batch(items) when is_list(items) do
+    items
+    |> Native.decode_batch()
+    |> Enum.map(fn
+      {:ok, string} -> {:ok, string}
+      {:error, _} -> {:error, :unknown_encoding}
+    end)
+  end
+
+  @doc """
+  Encodes multiple strings in a single NIF call.
+
+  This is more efficient than calling `encode/2` repeatedly when processing
+  many items, as it amortizes the NIF dispatch overhead.
+
+  Results are returned in the same order as the input items.
+
+  **Note:** Batch operations always use dirty CPU schedulers, regardless of
+  input size. See the [Batch Processing Guide](batch.md) for details.
+
+  ## Arguments
+
+  - `items` - List of `{string, encoding}` tuples to encode
+
+  ## Returns
+
+  List of `{:ok, binary}` or `{:error, :unknown_encoding}` tuples.
+
+  ## Examples
+
+      iex> items = [{"Hello", "windows-1252"}, {"あ", "shift_jis"}]
+      iex> EncodingRs.encode_batch(items)
+      [{:ok, "Hello"}, {:ok, <<130, 160>>}]
+
+      iex> EncodingRs.encode_batch([{"test", "invalid-encoding"}])
+      [{:error, :unknown_encoding}]
+  """
+  @spec encode_batch([encode_batch_item()]) :: [batch_result(binary())]
+  def encode_batch(items) when is_list(items) do
+    items
+    |> Native.encode_batch()
+    |> Enum.map(fn
+      {:ok, binary} -> {:ok, binary}
+      {:error, _} -> {:error, :unknown_encoding}
+    end)
   end
 
   @doc """
