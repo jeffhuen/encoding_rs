@@ -11,7 +11,7 @@ defmodule EncodingRs.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description:
-        "Character encoding and decoding for Elixir. Convert between UTF-8 and Shift_JIS, EUC-JP, ISO-2022-JP (Japanese), GBK, GB18030, Big5 (Chinese), EUC-KR (Korean), Windows-1252, ISO-8859-1 through ISO-8859-16, KOI8-R/U (Cyrillic), UTF-16LE, UTF-16BE, and 200+ legacy encodings. Streaming and batch processing support for large files and high-throughput workloads. Powered by Rust's encoding_rs (Firefox's encoding library).",
+        "High-performance character encoding/decoding for Elixir. Supports 200+ encodings (Shift_JIS, GBK, Big5, Windows-1252, ISO-8859, UTF-16, and more). Streaming and batch APIs. Powered by Mozilla's encoding_rs.",
       package: package(),
       docs: docs(),
       dialyzer: [
