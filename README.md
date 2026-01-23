@@ -187,20 +187,16 @@ Comparison against `codepagex` (pure Elixir) and `iconv` (Erlang NIF wrapping li
 
 *Benchmarks on Apple Silicon M1. See [comparison guide](guides/comparison.md) for full methodology, more encodings, and when to use each library.*
 
-## Migrating from excoding
+## Quick Start
 
-If you're switching from the original `excoding` package:
+```elixir
+# Decode a Shift_JIS file to UTF-8
+{:ok, content} = File.read("japanese.txt")
+{:ok, utf8_string} = EncodingRs.decode(content, "shift_jis")
 
-1. Update your dependency:
-   ```elixir
-   # Before
-   {:excoding, "~> 0.1"}
-
-   # After
-   {:encoding_rs, "~> 0.2.1"}
-   ```
-
-2. That's it! The module name is still `EncodingRs`, so your code works unchanged.
+# Encode a UTF-8 string to Windows-1252
+{:ok, binary} = EncodingRs.encode("Hello world", "windows-1252")
+```
 
 ## Acknowledgments
 
