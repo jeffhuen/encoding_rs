@@ -11,6 +11,7 @@ defmodule EncodingRs.Native do
     base_url: "https://github.com/jeffhuen/encoding_rs/releases/download/v#{version}",
     force_build: System.get_env("ENCODING_RS_BUILD") in ["1", "true"],
     mode: if(Mix.env() == :prod, do: :release, else: :debug),
+    nif_versions: ["2.15", "2.16", "2.17"],
     targets:
       Enum.uniq(["aarch64-unknown-linux-musl" | RustlerPrecompiled.Config.default_targets()]),
     version: version
