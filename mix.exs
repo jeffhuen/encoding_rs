@@ -1,7 +1,7 @@
 defmodule EncodingRs.MixProject do
   use Mix.Project
 
-  @version "0.2.0"
+  @version "0.2.1"
 
   def project do
     [
@@ -68,6 +68,7 @@ defmodule EncodingRs.MixProject do
         "README.md",
         "guides/streaming.md",
         "guides/batch.md",
+        "guides/comparison.md",
         "CHANGELOG.md"
       ],
       groups_for_extras: [

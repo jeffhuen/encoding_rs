@@ -48,7 +48,7 @@ And more - see the full list at [encoding.spec.whatwg.org](https://encoding.spec
 
 ## Features
 
-- **High performance** - SIMD-optimized Rust NIF, 2-3x faster than pure Elixir alternatives
+- **High performance** - SIMD-optimized Rust NIF, 3-15x faster than alternatives (see [benchmarks](#benchmarks))
 - **Batch processing** - encode/decode multiple items in a single NIF call for throughput
 - **Streaming decoder** - handle large files and chunked data without corrupting multibyte characters
 - **BOM detection** - automatically detect UTF-8, UTF-16LE, UTF-16BE from byte order marks
@@ -61,7 +61,7 @@ And more - see the full list at [encoding.spec.whatwg.org](https://encoding.spec
 ```elixir
 def deps do
   [
-    {:encoding_rs, "~> 0.2"}
+    {:encoding_rs, "~> 0.2.1"}
   ]
 end
 ```
@@ -167,6 +167,20 @@ config :encoding_rs, dirty_threshold: 131_072
 
 **Decreasing the threshold** keeps normal schedulers more available, which benefits latency-sensitive and high-concurrency applications. However, more frequent context switching adds overhead that may reduce throughput.
 
+## Benchmarks
+
+Comparison against `codepagex` (pure Elixir) and `iconv` (Erlang NIF wrapping libiconv):
+
+| Encoding | Input Size | encoding_rs | codepagex | iconv |
+|----------|------------|-------------|-----------|-------|
+| ISO-8859-1 | 100 B | 347 ns | 487 ns (1.4x) | 2.0 μs (5.6x) |
+| ISO-8859-1 | 10 KB | 9.2 μs | 118 μs (13x) | 130 μs (14x) |
+| ISO-8859-1 | 1 MB | 3.0 ms | 12.6 ms (4x) | 13.1 ms (4x) |
+| Shift_JIS | 10 KB | 13 μs | N/A | 196 μs (15x) |
+| UTF-16LE | 10 KB | 8.1 μs | N/A | 98 μs (12x) |
+
+*Benchmarks on Apple Silicon M1. See [comparison guide](guides/comparison.md) for full methodology, more encodings, and when to use each library.*
+
 ## Migrating from excoding
 
 If you're switching from the original `excoding` package:
@@ -177,7 +191,7 @@ If you're switching from the original `excoding` package:
    {:excoding, "~> 0.1"}
 
    # After
-   {:encoding_rs, "~> 0.2"}
+   {:encoding_rs, "~> 0.2.1"}
    ```
 
 2. That's it! The module name is still `EncodingRs`, so your code works unchanged.

@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.2.1 (2026-01-22)
+
+### Fixed
+
+- Fixed precompiled binary checksums that were mismatched with release artifacts
+
+### Documentation
+
+- Added [Library Comparison Guide](guides/comparison.md) with benchmarks against codepagex and iconv
+- Added benchmark results to README showing 3-15x performance improvement over alternatives
+- Added `bench/comparison_bench.exs` benchmark suite for reproducing results
+
 ## v0.2.0 (2026-01-22)
 
 ### Added
