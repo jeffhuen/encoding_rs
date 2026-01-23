@@ -1,0 +1,90 @@
+name: Build precompiled NIFs
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g., 0.1.0) - must match mix.exs'
+        required: true
+        type: string
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build_release:
+    name: NIF ${{ matrix.nif }} - ${{ matrix.job.target }} (${{ matrix.job.os }})
+    runs-on: ${{ matrix.job.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        nif: ["2.17", "2.16", "2.15"]
+        job:
+          - { target: arm-unknown-linux-gnueabihf , os: ubuntu-22.04 , use-cross: true }
+          - { target: aarch64-unknown-linux-gnu   , os: ubuntu-22.04 , use-cross: true }
+          - { target: aarch64-unknown-linux-musl  , os: ubuntu-22.04 , use-cross: true }
+          - { target: aarch64-apple-darwin        , os: macos-14     }
+          - { target: riscv64gc-unknown-linux-gnu , os: ubuntu-22.04 , use-cross: true }
+          - { target: x86_64-apple-darwin         , os: macos-15     }
+          - { target: x86_64-unknown-linux-gnu    , os: ubuntu-22.04 }
+          - { target: x86_64-unknown-linux-musl   , os: ubuntu-22.04 , use-cross: true }
+          - { target: x86_64-pc-windows-gnu       , os: windows-2022 }
+          - { target: x86_64-pc-windows-msvc      , os: windows-2022 }
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set project version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "PROJECT_VERSION=${{ inputs.version }}" >> $GITHUB_ENV
+          else
+            # Extract from tag (v0.2.1 -> 0.2.1)
+            echo "PROJECT_VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+          fi
+
+      - name: Verify version matches mix.exs
+        shell: bash
+        run: |
+          MIX_VERSION=$(sed -n 's/^  @version "\(.*\)"/\1/p' mix.exs | head -n1)
+          if [ "$MIX_VERSION" != "$PROJECT_VERSION" ]; then
+            echo "::error::Version mismatch! Input: $PROJECT_VERSION, mix.exs: $MIX_VERSION"
+            exit 1
+          fi
+          echo "Building version $PROJECT_VERSION"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.job.target }}
+
+      - name: Build the project
+        id: build-crate
+        uses: philss/rustler-precompiled-action@v1.1.4
+        with:
+          project-name: encoding_rs_nif
+          project-version: ${{ env.PROJECT_VERSION }}
+          target: ${{ matrix.job.target }}
+          nif-version: ${{ matrix.nif }}
+          use-cross: ${{ matrix.job.use-cross }}
+          project-dir: "native/encoding_rs"
+
+      - name: Artifact upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build-crate.outputs.file-name }}
+          path: ${{ steps.build-crate.outputs.file-path }}
+
+      - name: Publish to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.PROJECT_VERSION }}
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          files: |
+            ${{ steps.build-crate.outputs.file-path }}

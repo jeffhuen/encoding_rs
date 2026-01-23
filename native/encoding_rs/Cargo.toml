@@ -1,0 +1,24 @@
+[package]
+name = "encoding_rs_nif"
+version = "0.1.0"
+authors = ["Jeff Huen"]
+edition = "2021"
+description = "NIF bindings for EncodingRs Elixir package"
+repository = "https://github.com/jeffhuen/encoding_rs"
+license = "MIT"
+
+[lib]
+name = "encoding_rs_nif"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.37"
+encoding_rs = "0.8"
+
+[features]
+default = []
+# NIF version features for rustler_precompiled (OTP 24+ = 2.15, OTP 26 = 2.16, OTP 27+ = 2.17)
+nif_version_2_15 = ["rustler/nif_version_2_15"]
+nif_version_2_16 = ["rustler/nif_version_2_16"]
+nif_version_2_17 = ["rustler/nif_version_2_17"]
