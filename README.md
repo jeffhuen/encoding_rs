@@ -61,7 +61,7 @@ And more - see the full list at [encoding.spec.whatwg.org](https://encoding.spec
 ```elixir
 def deps do
   [
-    {:encoding_rs, "~> 0.1"}
+    {:encoding_rs, "~> 0.2"}
   ]
 end
 ```
