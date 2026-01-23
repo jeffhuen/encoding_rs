@@ -1,5 +1,11 @@
 # EncodingRs
 
+[![Hex.pm](https://img.shields.io/hexpm/v/encoding_rs.svg)](https://hex.pm/packages/encoding_rs)
+[![Hex Docs](https://img.shields.io/badge/hex-docs-blue.svg)](https://hexdocs.pm/encoding_rs)
+[![CI](https://github.com/jeffhuen/encoding_rs/actions/workflows/ci.yml/badge.svg)](https://github.com/jeffhuen/encoding_rs/actions/workflows/ci.yml)
+[![License](https://img.shields.io/hexpm/l/encoding_rs.svg)](https://github.com/jeffhuen/encoding_rs/blob/main/LICENSE)
+[![Powered by encoding_rs](https://img.shields.io/badge/powered%20by-encoding__rs-orange.svg)](https://crates.io/crates/encoding_rs)
+
 Character encoding and decoding for Elixir. Convert text between UTF-8 and legacy encodings like Shift_JIS, GBK, Big5, EUC-KR, Windows-1252, and 200+ others.
 
 Powered by Rust's [encoding_rs](https://crates.io/crates/encoding_rs) - the same encoding library used by Firefox.
