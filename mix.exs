@@ -1,7 +1,7 @@
 defmodule EncodingRs.MixProject do
   use Mix.Project
 
-  @version "0.2.1"
+  @version "0.2.2"
 
   def project do
     [
@@ -11,7 +11,7 @@ defmodule EncodingRs.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       description:
-        "High-performance character encoding/decoding for Elixir. Supports 200+ encodings (Shift_JIS, GBK, Big5, Windows-1252, ISO-8859, UTF-16, and more). Streaming and batch APIs. Powered by Mozilla's encoding_rs.",
+        "High-performance character encoding/decoding for Elixir. Supports all 40 WHATWG encodings with 200+ label aliases (Shift_JIS, GBK, Big5, Windows-1252, ISO-8859, UTF-16, and more). Streaming and batch APIs. Powered by Mozilla's encoding_rs.",
       package: package(),
       docs: docs(),
       dialyzer: [

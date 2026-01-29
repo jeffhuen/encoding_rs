@@ -7,7 +7,7 @@ A comparison of Elixir character encoding libraries: `encoding_rs`, `codepagex`,
 | Feature | encoding_rs | codepagex | iconv |
 |---------|-------------|-----------|-------|
 | Implementation | Rust NIF | Pure Elixir | Erlang NIF (C) |
-| Encoding Support | 200+ (WHATWG) | ~50 | System-dependent |
+| Encoding Support | 40 encodings, 200+ aliases (WHATWG) | ~50 | System-dependent |
 | Streaming API | ✅ Yes | ❌ No | ❌ No |
 | Batch Operations | ✅ Yes | ❌ No | ❌ No |
 | BOM Detection | ✅ Yes | ❌ No | ❌ No |

@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.2.2 (2026-01-29)
+
+### Fixed
+
+- **NIF safety**: Replaced `.unwrap()` calls in `encode_batch` with proper error propagation via `NifResult`, preventing potential BEAM crashes on memory allocation failure
+- **Documentation**: Removed unsupported HZ encoding from README (not in WHATWG/encoding_rs)
+- **Documentation**: Clarified "200+ encodings" claim — the library supports 40 distinct WHATWG encodings with 200+ label aliases
+- **Documentation**: Fixed `Decoder.stream/2` docs that incorrectly claimed 1:1 output-to-input correspondence; the stream may emit an extra element when flushing buffered bytes
+
+### Improved
+
+- **Rust DRY refactor**: Extracted shared `decoder_decode_chunk_impl` to eliminate duplicated logic between `decoder_decode_chunk` and `decoder_decode_chunk_dirty` NIF functions
+- **Elixir DRY refactor**: Extracted `route_nif/4` helper to eliminate duplicated dirty-scheduler routing in `encode/2` and `decode/2`
+- **Elixir DRY refactor**: Extracted `normalize_result/1` helper to unify error normalization across `encode/2`, `decode/2`, `encode_batch/1`, and `decode_batch/1`
+
+### Testing
+
+- Added stream flush test verifying extra element emission for incomplete trailing multibyte sequences
+- Added stream flush test verifying no extra element when stream ends cleanly
+- Added `stream_with_errors/2` flush test verifying `had_errors: true` on flushed replacement characters
+
 ## v0.2.1 (2026-01-22)
 
 ### Fixed

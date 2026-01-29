@@ -6,14 +6,14 @@
 [![License](https://img.shields.io/hexpm/l/encoding_rs.svg)](https://github.com/jeffhuen/encoding_rs/blob/main/LICENSE)
 [![Powered by encoding_rs](https://img.shields.io/badge/powered%20by-encoding__rs-orange.svg)](https://crates.io/crates/encoding_rs)
 
-Character encoding and decoding for Elixir. Convert text between UTF-8 and legacy encodings like Shift_JIS, GBK, Big5, EUC-KR, Windows-1252, and 200+ others.
+Character encoding and decoding for Elixir. Convert text between UTF-8 and legacy encodings like Shift_JIS, GBK, Big5, EUC-KR, Windows-1252, and more. Supports all 40 encodings from the WHATWG Encoding Standard (with 200+ label aliases).
 
 Powered by Rust's [encoding_rs](https://crates.io/crates/encoding_rs) - the same encoding library used by Firefox.
 
 ## Use Cases
 
 - **Processing Japanese text files** - Shift_JIS, EUC-JP, ISO-2022-JP
-- **Processing Chinese text files** - GBK, GB18030, Big5, HZ
+- **Processing Chinese text files** - GBK, GB18030, Big5
 - **Processing Korean text files** - EUC-KR
 - **Importing legacy data** - Windows-1252, ISO-8859-1, legacy code pages
 - **Web scraping non-UTF-8 sites** - decode HTML in any encoding
@@ -24,7 +24,7 @@ Powered by Rust's [encoding_rs](https://crates.io/crates/encoding_rs) - the same
 
 **Japanese**: Shift_JIS, EUC-JP, ISO-2022-JP
 
-**Chinese**: GBK, GB18030, Big5, HZ
+**Chinese**: GBK, GB18030, Big5
 
 **Korean**: EUC-KR
 
@@ -67,7 +67,7 @@ And more - see the full list at [encoding.spec.whatwg.org](https://encoding.spec
 ```elixir
 def deps do
   [
-    {:encoding_rs, "~> 0.2.1"}
+    {:encoding_rs, "~> 0.2.2"}
   ]
 end
 ```

@@ -189,7 +189,10 @@ defmodule EncodingRs.Decoder do
 
   ## Returns
 
-  A stream of decoded UTF-8 strings, one for each input chunk.
+  A stream of decoded UTF-8 strings. One element is emitted per input chunk,
+  plus an additional element may be emitted at the end if the decoder has
+  buffered bytes remaining (e.g., an incomplete multibyte sequence that gets
+  flushed as a replacement character).
 
   ## Examples
 
@@ -214,7 +217,8 @@ defmodule EncodingRs.Decoder do
   ## Notes
 
   - The stream automatically handles the `is_last` flag for the final chunk
-  - Each output element corresponds to one input chunk
+  - The output may contain one more element than the input if buffered bytes
+    are flushed at the end of the stream
   - For better error visibility, use `stream_with_errors/2`
   """
   @spec stream(Enumerable.t(), EncodingRs.encoding()) :: Enumerable.t()

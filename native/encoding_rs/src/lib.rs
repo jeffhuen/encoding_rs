@@ -249,19 +249,23 @@ fn decode_batch(items: Vec<(Binary, &str)>) -> Vec<(Atom, String)> {
 /// List of `{:ok, binary}` or `{:error, :unknown_encoding}` tuples,
 /// in the same order as the input.
 #[rustler::nif(schedule = "DirtyCpu")]
-fn encode_batch<'a>(env: Env<'a>, items: Vec<(&str, &str)>) -> Vec<(Atom, Binary<'a>)> {
+fn encode_batch<'a>(env: Env<'a>, items: Vec<(&str, &str)>) -> NifResult<Vec<(Atom, Binary<'a>)>> {
     items
         .into_iter()
         .map(|(in_str, enc)| match Encoding::for_label(enc.as_bytes()) {
             Some(encoding) => {
                 let (encoded, _, _had_errors) = encoding.encode(in_str);
-                let mut bin = OwnedBinary::new(encoded.len()).unwrap();
-                bin.as_mut_slice().write_all(&encoded).unwrap();
-                (atoms::ok(), bin.release(env))
+                let mut bin = OwnedBinary::new(encoded.len())
+                    .ok_or_else(|| rustler::Error::Term(Box::new("allocation_failed")))?;
+                bin.as_mut_slice()
+                    .write_all(&encoded)
+                    .map_err(|_| rustler::Error::Term(Box::new("write_failed")))?;
+                Ok((atoms::ok(), bin.release(env)))
             }
             None => {
-                let bin = OwnedBinary::new(0).unwrap();
-                (atoms::error(), bin.release(env))
+                let bin = OwnedBinary::new(0)
+                    .ok_or_else(|| rustler::Error::Term(Box::new("allocation_failed")))?;
+                Ok((atoms::error(), bin.release(env)))
             }
         })
         .collect()
@@ -347,29 +351,20 @@ fn decoder_decode_chunk(
     chunk: Binary,
     is_last: bool,
 ) -> NifResult<(Atom, String, bool)> {
-    let mut decoder = decoder_ref
-        .decoder
-        .lock()
-        .map_err(|_| rustler::Error::Term(Box::new("lock_poisoned")))?;
-
-    let input = chunk.as_slice();
-
-    // Calculate maximum output size: worst case is 3 bytes per input byte for UTF-8
-    // plus potential replacement characters
-    let max_output_len = decoder
-        .max_utf8_buffer_length(input.len())
-        .unwrap_or(input.len() * 3 + 3);
-
-    let mut output = String::with_capacity(max_output_len);
-
-    let (_result, _read, had_errors) = decoder.decode_to_string(input, &mut output, is_last);
-
-    Ok((atoms::ok(), output, had_errors))
+    decoder_decode_chunk_impl(decoder_ref, chunk, is_last)
 }
 
 /// Decodes a chunk using a dirty CPU scheduler for large chunks.
 #[rustler::nif(schedule = "DirtyCpu")]
 fn decoder_decode_chunk_dirty(
+    decoder_ref: ResourceArc<DecoderResource>,
+    chunk: Binary,
+    is_last: bool,
+) -> NifResult<(Atom, String, bool)> {
+    decoder_decode_chunk_impl(decoder_ref, chunk, is_last)
+}
+
+fn decoder_decode_chunk_impl(
     decoder_ref: ResourceArc<DecoderResource>,
     chunk: Binary,
     is_last: bool,
@@ -380,6 +375,9 @@ fn decoder_decode_chunk_dirty(
         .map_err(|_| rustler::Error::Term(Box::new("lock_poisoned")))?;
 
     let input = chunk.as_slice();
+
+    // Calculate maximum output size: worst case is 3 bytes per input byte for UTF-8
+    // plus potential replacement characters
     let max_output_len = decoder
         .max_utf8_buffer_length(input.len())
         .unwrap_or(input.len() * 3 + 3);

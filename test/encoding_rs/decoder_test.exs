@@ -220,6 +220,35 @@ defmodule EncodingRs.DecoderTest do
 
       assert result == "A"
     end
+
+    test "emits extra flush element for incomplete trailing sequence" do
+      # Input ends with incomplete Shift_JIS lead byte 0x82 (no trailing byte)
+      # The stream should emit an extra element with the replacement character
+      chunks = [<<0x82, 0xA0, 0x82>>]
+
+      elements =
+        chunks
+        |> Decoder.stream("shift_jis")
+        |> Enum.to_list()
+
+      # One element from the chunk, one from the flush
+      assert length(elements) == 2
+      assert Enum.at(elements, 0) == "あ"
+      assert Enum.at(elements, 1) == "�"
+    end
+
+    test "no extra flush element when stream ends cleanly" do
+      chunks = [<<0x82, 0xA0>>]
+
+      elements =
+        chunks
+        |> Decoder.stream("shift_jis")
+        |> Enum.to_list()
+
+      # Only one element, no flush needed
+      assert length(elements) == 1
+      assert Enum.at(elements, 0) == "あ"
+    end
   end
 
   describe "stream_with_errors/2" do
@@ -250,6 +279,21 @@ defmodule EncodingRs.DecoderTest do
 
       assert Enum.join(outputs) == "あ"
       assert Enum.all?(errors, &(&1 == false))
+    end
+
+    test "flush element reports had_errors for incomplete trailing sequence" do
+      # Input ends with incomplete Shift_JIS lead byte
+      chunks = [<<0x82, 0xA0, 0x82>>]
+
+      results =
+        chunks
+        |> Decoder.stream_with_errors("shift_jis")
+        |> Enum.to_list()
+
+      # Two elements: chunk result + flush result
+      assert length(results) == 2
+      assert {"あ", false} = Enum.at(results, 0)
+      assert {"�", true} = Enum.at(results, 1)
     end
   end
 

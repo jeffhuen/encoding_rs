@@ -114,17 +114,9 @@ defmodule EncodingRs do
   """
   @spec encode(String.t(), encoding()) :: {:ok, binary()} | {:error, :unknown_encoding}
   def encode(string, encoding) when is_binary(string) and is_binary(encoding) do
-    if byte_size(string) > @dirty_threshold do
-      case Native.encode_dirty(string, encoding) do
-        {:ok, binary} -> {:ok, binary}
-        {:error, _} -> {:error, :unknown_encoding}
-      end
-    else
-      case Native.encode_normal(string, encoding) do
-        {:ok, binary} -> {:ok, binary}
-        {:error, _} -> {:error, :unknown_encoding}
-      end
-    end
+    string
+    |> route_nif(encoding, &Native.encode_normal/2, &Native.encode_dirty/2)
+    |> normalize_result()
   end
 
   @doc """
@@ -167,17 +159,9 @@ defmodule EncodingRs do
   """
   @spec decode(binary(), encoding()) :: {:ok, String.t()} | {:error, :unknown_encoding}
   def decode(binary, encoding) when is_binary(binary) and is_binary(encoding) do
-    if byte_size(binary) > @dirty_threshold do
-      case Native.decode_dirty(binary, encoding) do
-        {:ok, string} -> {:ok, string}
-        {:error, _} -> {:error, :unknown_encoding}
-      end
-    else
-      case Native.decode_normal(binary, encoding) do
-        {:ok, string} -> {:ok, string}
-        {:error, _} -> {:error, :unknown_encoding}
-      end
-    end
+    binary
+    |> route_nif(encoding, &Native.decode_normal/2, &Native.decode_dirty/2)
+    |> normalize_result()
   end
 
   @doc """
@@ -332,10 +316,7 @@ defmodule EncodingRs do
   def decode_batch(items) when is_list(items) do
     items
     |> Native.decode_batch()
-    |> Enum.map(fn
-      {:ok, string} -> {:ok, string}
-      {:error, _} -> {:error, :unknown_encoding}
-    end)
+    |> Enum.map(&normalize_result/1)
   end
 
   @doc """
@@ -370,10 +351,7 @@ defmodule EncodingRs do
   def encode_batch(items) when is_list(items) do
     items
     |> Native.encode_batch()
-    |> Enum.map(fn
-      {:ok, binary} -> {:ok, binary}
-      {:error, _} -> {:error, :unknown_encoding}
-    end)
+    |> Enum.map(&normalize_result/1)
   end
 
   @doc """
@@ -449,4 +427,17 @@ defmodule EncodingRs do
         {:error, :no_bom}
     end
   end
+
+  # Private helpers
+
+  defp route_nif(input, encoding, normal_fn, dirty_fn) do
+    if byte_size(input) > @dirty_threshold do
+      dirty_fn.(input, encoding)
+    else
+      normal_fn.(input, encoding)
+    end
+  end
+
+  defp normalize_result({:ok, value}), do: {:ok, value}
+  defp normalize_result({:error, _}), do: {:error, :unknown_encoding}
 end
