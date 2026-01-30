@@ -58,8 +58,10 @@ defmodule EncodingRs.Decoder do
   @typedoc "An opaque decoder reference. Created with `new/1`."
   @type t :: reference()
 
-  @typedoc "Result of decoding a chunk: `{:ok, decoded_string, had_errors}`"
-  @type decode_result :: {:ok, String.t(), had_errors :: boolean()}
+  @typedoc "Result of decoding a chunk: `{:ok, decoded_string, had_errors}` or `{:error, reason}`"
+  @type decode_result ::
+          {:ok, String.t(), had_errors :: boolean()}
+          | {:error, :lock_poisoned | :input_too_large}
 
   @doc """
   Creates a new stateful decoder for the specified encoding.
@@ -130,6 +132,8 @@ defmodule EncodingRs.Decoder do
   - `{:ok, output, had_errors}` on success
     - `output` - The decoded UTF-8 string for this chunk
     - `had_errors` - `true` if any bytes were replaced with U+FFFD
+  - `{:error, :input_too_large}` if the chunk exceeds `EncodingRs.max_input_size/0`
+  - `{:error, :lock_poisoned}` if the internal decoder mutex is poisoned (extremely rare)
 
   ## Behavior
 
@@ -137,6 +141,8 @@ defmodule EncodingRs.Decoder do
     chunk are buffered internally and completed with the next chunk.
   - When `is_last` is `true`: Any remaining incomplete sequences are replaced
     with U+FFFD (the Unicode replacement character).
+  - Chunks exceeding the configured maximum input size (see `EncodingRs.max_input_size/0`)
+    are rejected before reaching the NIF.
 
   ## Examples
 
@@ -150,10 +156,17 @@ defmodule EncodingRs.Decoder do
   @spec decode_chunk(t(), binary(), boolean()) :: decode_result()
   def decode_chunk(decoder, chunk, is_last \\ false)
       when is_reference(decoder) and is_binary(chunk) and is_boolean(is_last) do
-    if byte_size(chunk) > @dirty_threshold do
-      Native.decoder_decode_chunk_dirty(decoder, chunk, is_last)
+    max = EncodingRs.max_input_size()
+
+    if max != :infinity and byte_size(chunk) > max do
+      {:error, :input_too_large}
     else
-      Native.decoder_decode_chunk(decoder, chunk, is_last)
+      if byte_size(chunk) > @dirty_threshold do
+        Native.decoder_decode_chunk_dirty(decoder, chunk, is_last)
+      else
+        Native.decoder_decode_chunk(decoder, chunk, is_last)
+      end
+      |> normalize_decode_result()
     end
   end
 
@@ -173,6 +186,7 @@ defmodule EncodingRs.Decoder do
       when is_reference(decoder) and is_binary(chunk) and is_boolean(is_last) do
     case decode_chunk(decoder, chunk, is_last) do
       {:ok, output, had_errors} -> {output, had_errors}
+      {:error, reason} -> raise RuntimeError, "decoder error: #{reason}"
     end
   end
 
@@ -280,4 +294,9 @@ defmodule EncodingRs.Decoder do
       fn _decoder -> :ok end
     )
   end
+
+  # Private helpers
+
+  defp normalize_decode_result({:ok, output, had_errors}), do: {:ok, output, had_errors}
+  defp normalize_decode_result({:error, "lock_poisoned", _}), do: {:error, :lock_poisoned}
 end

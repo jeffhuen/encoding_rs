@@ -134,6 +134,13 @@ defmodule EncodingRs.DecoderTest do
 
       assert out1 <> out2 == "あ"
     end
+
+    @tag :slow
+    test "rejects oversized chunk" do
+      {:ok, decoder} = Decoder.new("utf-8")
+      big = :binary.copy(<<0>>, EncodingRs.max_input_size() + 1)
+      assert {:error, :input_too_large} = Decoder.decode_chunk(decoder, big, true)
+    end
   end
 
   describe "decode_chunk!/3" do

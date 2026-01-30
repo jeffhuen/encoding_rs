@@ -67,7 +67,7 @@ And more - see the full list at [encoding.spec.whatwg.org](https://encoding.spec
 ```elixir
 def deps do
   [
-    {:encoding_rs, "~> 0.2.2"}
+    {:encoding_rs, "~> 0.2.3"}
   ]
 end
 ```
@@ -172,6 +172,24 @@ config :encoding_rs, dirty_threshold: 131_072
 **Increasing the threshold** reduces context switching overhead, which benefits batch processing and throughput-focused workloads. However, larger operations will block normal schedulers longer, potentially causing latency for other processes.
 
 **Decreasing the threshold** keeps normal schedulers more available, which benefits latency-sensitive and high-concurrency applications. However, more frequent context switching adds overhead that may reduce throughput.
+
+## Maximum Input Size
+
+To prevent excessive memory allocation from untrusted or unexpectedly large inputs, encoding and decoding operations enforce a configurable maximum input size. Inputs exceeding this limit return `{:error, :input_too_large}` before reaching the NIF. Batch operations reject oversized items individually — valid items in the same batch still succeed.
+
+The default limit is **100MB**. This is a **runtime** setting — it can be changed in `runtime.exs` or dynamically without recompiling:
+
+```elixir
+# Increase the limit
+config :encoding_rs, max_input_size: 500 * 1024 * 1024
+
+# Disable entirely (trusted inputs only)
+config :encoding_rs, max_input_size: :infinity
+```
+
+**Why a size limit?** A single large input can cause up to 3x memory amplification in the NIF (input buffer + output buffer + BEAM binary copy). A 500MB input could transiently allocate over 1.5GB, potentially destabilizing the BEAM node even on a dirty scheduler.
+
+**For large files**, use the streaming decoder (`EncodingRs.Decoder.stream/2`) with bounded chunk sizes instead of loading the entire file into memory. The streaming API is not subject to the input size limit since each chunk is validated independently.
 
 ## Benchmarks
 

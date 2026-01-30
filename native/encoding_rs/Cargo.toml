@@ -1,6 +1,6 @@
 [package]
 name = "encoding_rs_nif"
-version = "0.2.2"
+version = "0.2.3"
 authors = ["Jeff Huen"]
 edition = "2021"
 description = "NIF bindings for EncodingRs Elixir package"

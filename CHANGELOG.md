@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.2.3 (2026-01-29)
+
+### Improved
+
+- **Rustler 0.37 modernization**: Replaced deprecated `rustler::resource!` macro and `on_load` callback with `#[rustler::resource_impl]` for automatic resource registration — the recommended pattern since Rustler 0.34
+- **Mutex poisoning safety**: `Decoder.decode_chunk/3` now returns `{:error, :lock_poisoned}` instead of raising an unhandled NIF exception if the internal mutex is poisoned (near-impossible in practice, but the code path is now safe)
+- **Elixir DRY refactor**: Extracted `normalize_decode_result/1` in `Decoder` module to unify error normalization for streaming decode operations, matching the `normalize_result/1` pattern in the main module
+
+### Added
+
+- **Input size guardrails**: Configurable maximum input size (default 100MB) to prevent excessive memory allocation from untrusted or unexpectedly large inputs
+  - `encode/2`, `decode/2`, batch operations, and `Decoder.decode_chunk/3` all validate input size
+  - Oversized inputs return `{:error, :input_too_large}` (or raise `ArgumentError` for bang variants)
+  - Batch operations reject oversized items individually while processing valid items normally
+  - **Runtime configurable** via `Application.get_env/3` — can be set in `runtime.exs` or changed dynamically with `Application.put_env/3` without recompiling
+  - Set to `:infinity` to disable the limit for trusted environments
+  - Configure via `config :encoding_rs, max_input_size: 200 * 1024 * 1024`
+  - `EncodingRs.max_input_size/0` returns the configured limit
+
+### Testing
+
+- Added input size validation tests for `encode/2`, `decode/2`, `encode!/2`, `decode!/2`, `decode_batch/1`, `encode_batch/1`, and `Decoder.decode_chunk/3`
+- Slow tests (allocating 100MB+) are excluded by default; run with `mix test --include slow`
+
 ## v0.2.2 (2026-01-29)
 
 ### Fixed

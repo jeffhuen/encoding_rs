@@ -18,7 +18,7 @@
 //! characters split across chunk boundaries.
 
 use encoding_rs::Encoding;
-use rustler::{Atom, Binary, Env, NifResult, OwnedBinary, ResourceArc};
+use rustler::{Atom, Binary, Env, NifResult, OwnedBinary, Resource, ResourceArc};
 use std::io::Write;
 use std::sync::Mutex;
 
@@ -41,6 +41,9 @@ mod atoms {
 pub struct DecoderResource {
     decoder: Mutex<encoding_rs::Decoder>,
 }
+
+#[rustler::resource_impl]
+impl Resource for DecoderResource {}
 
 /// Decodes a binary from the specified encoding to a UTF-8 string.
 ///
@@ -369,10 +372,10 @@ fn decoder_decode_chunk_impl(
     chunk: Binary,
     is_last: bool,
 ) -> NifResult<(Atom, String, bool)> {
-    let mut decoder = decoder_ref
-        .decoder
-        .lock()
-        .map_err(|_| rustler::Error::Term(Box::new("lock_poisoned")))?;
+    let mut decoder = match decoder_ref.decoder.lock() {
+        Ok(guard) => guard,
+        Err(_) => return Ok((atoms::error(), String::from("lock_poisoned"), false)),
+    };
 
     let input = chunk.as_slice();
 
@@ -388,10 +391,4 @@ fn decoder_decode_chunk_impl(
     Ok((atoms::ok(), output, had_errors))
 }
 
-#[allow(non_local_definitions)]
-fn on_load(env: Env, _info: rustler::Term) -> bool {
-    let _ = rustler::resource!(DecoderResource, env);
-    true
-}
-
-rustler::init!("Elixir.EncodingRs.Native", load = on_load);
+rustler::init!("Elixir.EncodingRs.Native");

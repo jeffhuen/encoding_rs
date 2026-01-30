@@ -88,6 +88,13 @@ Enum.zip(items, results)
 end)
 ```
 
+Possible error reasons:
+
+- `:unknown_encoding` — the encoding label is not recognized
+- `:input_too_large` — the item exceeds `EncodingRs.max_input_size/0` (default 100MB)
+
+Oversized items are rejected individually — other items in the same batch are still processed normally.
+
 ### Mixed Encodings
 
 Batch operations support different encodings per item:
@@ -164,14 +171,16 @@ If you have a use case that would benefit from these options, please [open an is
 
 2. **Reasonable batch sizes** - Batches of 100-10,000 items work well. Extremely large batches (100K+) may cause memory pressure.
 
-3. **Consider chunking very large lists**:
+3. **Mind the input size limit** - Individual items exceeding `EncodingRs.max_input_size/0` (default 100MB) are rejected with `{:error, :input_too_large}`. For very large items, use the streaming decoder or increase the limit via `config :encoding_rs, max_input_size: :infinity`.
+
+4. **Consider chunking very large lists**:
    ```elixir
    large_list
    |> Enum.chunk_every(1000)
    |> Enum.flat_map(&EncodingRs.decode_batch/1)
    ```
 
-4. **Parallel batches** - For very large workloads, split across processes:
+5. **Parallel batches** - For very large workloads, split across processes:
    ```elixir
    items
    |> Enum.chunk_every(1000)

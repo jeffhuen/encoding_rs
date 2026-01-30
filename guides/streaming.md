@@ -169,9 +169,29 @@ File.stream!(path, [], 256 * 1024)
 |----------|----------|
 | Small files (<1MB) | `EncodingRs.decode/2` |
 | Large files | `EncodingRs.Decoder.stream/2` |
+| Files > 100MB | `EncodingRs.Decoder.stream/2` (avoids input size limit) |
 | Network streams | `EncodingRs.Decoder` |
 | Unknown size | `EncodingRs.Decoder.stream/2` |
 | Memory-constrained | `EncodingRs.Decoder.stream/2` |
+| Untrusted input | `EncodingRs.Decoder.stream/2` (bounded chunk sizes) |
+
+### Input Size Limit
+
+One-shot operations (`EncodingRs.decode/2`, `EncodingRs.encode/2`) enforce a configurable maximum input size (default 100MB) to prevent excessive memory allocation. Inputs exceeding this limit return `{:error, :input_too_large}`.
+
+The streaming decoder is not affected by this limit at the file level because each chunk is validated independently. As long as your chunk size is below the limit (and it should be — 64KB to 256KB is typical), the streaming API can process files of any size.
+
+If you need to one-shot decode inputs larger than 100MB, you can adjust the limit at runtime:
+
+```elixir
+# In config/runtime.exs
+config :encoding_rs, max_input_size: 500 * 1024 * 1024
+
+# Or disable entirely for trusted inputs
+config :encoding_rs, max_input_size: :infinity
+```
+
+See `EncodingRs.max_input_size/0` for details.
 
 ## Common Encodings
 
