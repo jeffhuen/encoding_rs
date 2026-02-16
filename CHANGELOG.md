@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.4 (2026-02-16)
+
+### Improved
+
+- **Reduced heap allocations in NIF error paths**: Error returns from `decode`, `decode_batch`, `canonical_name`, and `detect_bom` no longer allocate heap strings — uses `String::new()` where Elixir discards the value, and `&'static str` where `encoding_rs` already provides static references
+- **Replaced `write_all` with `copy_from_slice`**: Encode operations (`encode`, `encode_batch`) now use the infallible `copy_from_slice` instead of the fallible `Write` trait, since buffers are pre-allocated to the exact required size
+- **Smarter streaming decoder memory management**: `shrink_to_fit()` in `decoder_decode_chunk` now only triggers when excess capacity exceeds 4KB, avoiding unnecessary `realloc` overhead on small chunks
+- **Extracted `empty_binary` helper**: De-duplicated zero-length binary allocation logic across `encode` and `encode_batch` error paths with accurate documentation about `enif_alloc_binary` costs
+
+### Removed
+
+- Unused Rustler atom definitions (`unknown_encoding`, `encode_error`, `decode_error`, `no_bom`) and `use std::io::Write` import
+
 ## v0.2.3 (2026-01-29)
 
 ### Improved
