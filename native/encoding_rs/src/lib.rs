@@ -19,17 +19,12 @@
 
 use encoding_rs::Encoding;
 use rustler::{Atom, Binary, Env, NifResult, OwnedBinary, Resource, ResourceArc};
-use std::io::Write;
 use std::sync::Mutex;
 
 mod atoms {
     rustler::atoms! {
         ok,
         error,
-        unknown_encoding,
-        encode_error,
-        decode_error,
-        no_bom,
     }
 }
 
@@ -74,7 +69,8 @@ fn decode_impl<'a>(_env: Env<'a>, in_binary: Binary, enc: &str) -> NifResult<(At
             // encoding_rs replaces unmappable characters with U+FFFD automatically
             Ok((atoms::ok(), decoded.into_owned()))
         }
-        None => Ok((atoms::error(), "unknown_encoding".to_string())),
+        // Elixir normalize_result/1 discards the string in error tuples
+        None => Ok((atoms::error(), String::new())),
     }
 }
 
@@ -105,23 +101,30 @@ fn encode_impl<'a>(env: Env<'a>, in_str: &str, enc: &str) -> NifResult<(Atom, Bi
     match Encoding::for_label(enc.as_bytes()) {
         Some(encoding) => {
             let (encoded, _, _had_errors) = encoding.encode(in_str);
-            // encoding_rs replaces unmappable characters automatically
 
             let mut bin = OwnedBinary::new(encoded.len())
                 .ok_or_else(|| rustler::Error::Term(Box::new("allocation_failed")))?;
-            bin.as_mut_slice()
-                .write_all(&encoded)
-                .map_err(|_| rustler::Error::Term(Box::new("write_failed")))?;
+            // copy_from_slice is infallible here: bin was allocated with encoded.len()
+            bin.as_mut_slice().copy_from_slice(&encoded);
 
             Ok((atoms::ok(), bin.release(env)))
         }
         None => {
-            // Return empty binary for error case
-            let bin = OwnedBinary::new(0)
-                .ok_or_else(|| rustler::Error::Term(Box::new("allocation_failed")))?;
-            Ok((atoms::error(), bin.release(env)))
+            let bin = empty_binary(env)?;
+            Ok((atoms::error(), bin))
         }
     }
+}
+
+/// Returns a zero-length BEAM binary for error-path returns.
+///
+/// `enif_alloc_binary(0)` still performs allocator bookkeeping, so this is
+/// not free, but it is the minimal allocation Rustler supports for a
+/// `Binary<'a>` return.
+fn empty_binary<'a>(env: Env<'a>) -> NifResult<Binary<'a>> {
+    let bin =
+        OwnedBinary::new(0).ok_or_else(|| rustler::Error::Term(Box::new("allocation_failed")))?;
+    Ok(bin.release(env))
 }
 
 /// Checks if an encoding label is valid/supported.
@@ -146,10 +149,10 @@ fn encoding_exists(enc: &str) -> bool {
 /// * `{:ok, name}` with the canonical encoding name
 /// * `{:error, :unknown_encoding}` if not recognized
 #[rustler::nif]
-fn canonical_name(enc: &str) -> (Atom, String) {
+fn canonical_name(enc: &str) -> (Atom, &'static str) {
     match Encoding::for_label(enc.as_bytes()) {
-        Some(encoding) => (atoms::ok(), encoding.name().to_string()),
-        None => (atoms::error(), "unknown_encoding".to_string()),
+        Some(encoding) => (atoms::ok(), encoding.name()),
+        None => (atoms::error(), "unknown_encoding"),
     }
 }
 
@@ -231,7 +234,8 @@ fn decode_batch(items: Vec<(Binary, &str)>) -> Vec<(Atom, String)> {
                 let (decoded, _, _had_errors) = encoding.decode(binary.as_slice());
                 (atoms::ok(), decoded.into_owned())
             }
-            None => (atoms::error(), "unknown_encoding".to_string()),
+            // Elixir normalize_result/1 discards the string in error tuples
+            None => (atoms::error(), String::new()),
         })
         .collect()
 }
@@ -260,15 +264,12 @@ fn encode_batch<'a>(env: Env<'a>, items: Vec<(&str, &str)>) -> NifResult<Vec<(At
                 let (encoded, _, _had_errors) = encoding.encode(in_str);
                 let mut bin = OwnedBinary::new(encoded.len())
                     .ok_or_else(|| rustler::Error::Term(Box::new("allocation_failed")))?;
-                bin.as_mut_slice()
-                    .write_all(&encoded)
-                    .map_err(|_| rustler::Error::Term(Box::new("write_failed")))?;
+                bin.as_mut_slice().copy_from_slice(&encoded);
                 Ok((atoms::ok(), bin.release(env)))
             }
             None => {
-                let bin = OwnedBinary::new(0)
-                    .ok_or_else(|| rustler::Error::Term(Box::new("allocation_failed")))?;
-                Ok((atoms::error(), bin.release(env)))
+                let bin = empty_binary(env)?;
+                Ok((atoms::error(), bin))
             }
         })
         .collect()
@@ -293,10 +294,10 @@ fn encode_batch<'a>(env: Env<'a>, items: Vec<(&str, &str)>) -> NifResult<Vec<(At
 /// * `{:ok, encoding_name, bom_length}` if a BOM is found
 /// * `{:error, :no_bom}` if no BOM is present
 #[rustler::nif]
-fn detect_bom(data: Binary) -> (Atom, String, usize) {
+fn detect_bom(data: Binary) -> (Atom, &'static str, usize) {
     match Encoding::for_bom(data.as_slice()) {
-        Some((encoding, bom_length)) => (atoms::ok(), encoding.name().to_string(), bom_length),
-        None => (atoms::error(), "no_bom".to_string(), 0),
+        Some((encoding, bom_length)) => (atoms::ok(), encoding.name(), bom_length),
+        None => (atoms::error(), "no_bom", 0),
     }
 }
 
@@ -379,14 +380,21 @@ fn decoder_decode_chunk_impl(
 
     let input = chunk.as_slice();
 
-    // Calculate maximum output size: worst case is 3 bytes per input byte for UTF-8
-    // plus potential replacement characters
+    // max_utf8_buffer_length is a worst-case estimate (up to 3x input size).
+    // We shrink after decoding to avoid passing oversized buffers through Rustler.
     let max_output_len = decoder
         .max_utf8_buffer_length(input.len())
         .unwrap_or(input.len() * 3 + 3);
 
     let mut output = String::with_capacity(max_output_len);
     let (_result, _read, had_errors) = decoder.decode_to_string(input, &mut output, is_last);
+
+    // Release excess capacity before Rustler copies this into a BEAM binary.
+    // Skip for small buffers where the realloc overhead outweighs the savings.
+    let excess = output.capacity() - output.len();
+    if excess > 4096 {
+        output.shrink_to_fit();
+    }
 
     Ok((atoms::ok(), output, had_errors))
 }
