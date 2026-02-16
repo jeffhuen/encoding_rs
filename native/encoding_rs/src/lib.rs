@@ -69,7 +69,7 @@ fn decode_impl<'a>(_env: Env<'a>, in_binary: Binary, enc: &str) -> NifResult<(At
             // encoding_rs replaces unmappable characters with U+FFFD automatically
             Ok((atoms::ok(), decoded.into_owned()))
         }
-        // Empty string avoids heap allocation; Elixir side discards this value
+        // Elixir normalize_result/1 discards the string in error tuples
         None => Ok((atoms::error(), String::new())),
     }
 }
@@ -110,12 +110,21 @@ fn encode_impl<'a>(env: Env<'a>, in_str: &str, enc: &str) -> NifResult<(Atom, Bi
             Ok((atoms::ok(), bin.release(env)))
         }
         None => {
-            // OwnedBinary::new(0) is a zero-cost allocation for the error case
-            let bin = OwnedBinary::new(0)
-                .ok_or_else(|| rustler::Error::Term(Box::new("allocation_failed")))?;
-            Ok((atoms::error(), bin.release(env)))
+            let bin = empty_binary(env)?;
+            Ok((atoms::error(), bin))
         }
     }
+}
+
+/// Returns a zero-length BEAM binary for error-path returns.
+///
+/// `enif_alloc_binary(0)` still performs allocator bookkeeping, so this is
+/// not free, but it is the minimal allocation Rustler supports for a
+/// `Binary<'a>` return.
+fn empty_binary<'a>(env: Env<'a>) -> NifResult<Binary<'a>> {
+    let bin =
+        OwnedBinary::new(0).ok_or_else(|| rustler::Error::Term(Box::new("allocation_failed")))?;
+    Ok(bin.release(env))
 }
 
 /// Checks if an encoding label is valid/supported.
@@ -225,7 +234,7 @@ fn decode_batch(items: Vec<(Binary, &str)>) -> Vec<(Atom, String)> {
                 let (decoded, _, _had_errors) = encoding.decode(binary.as_slice());
                 (atoms::ok(), decoded.into_owned())
             }
-            // Empty string avoids heap allocation; Elixir side discards this value
+            // Elixir normalize_result/1 discards the string in error tuples
             None => (atoms::error(), String::new()),
         })
         .collect()
@@ -259,9 +268,8 @@ fn encode_batch<'a>(env: Env<'a>, items: Vec<(&str, &str)>) -> NifResult<Vec<(At
                 Ok((atoms::ok(), bin.release(env)))
             }
             None => {
-                let bin = OwnedBinary::new(0)
-                    .ok_or_else(|| rustler::Error::Term(Box::new("allocation_failed")))?;
-                Ok((atoms::error(), bin.release(env)))
+                let bin = empty_binary(env)?;
+                Ok((atoms::error(), bin))
             }
         })
         .collect()
@@ -382,8 +390,11 @@ fn decoder_decode_chunk_impl(
     let (_result, _read, had_errors) = decoder.decode_to_string(input, &mut output, is_last);
 
     // Release excess capacity before Rustler copies this into a BEAM binary.
-    // Without this, a 1KB chunk could hold a 3KB+ buffer until GC collects it.
-    output.shrink_to_fit();
+    // Skip for small buffers where the realloc overhead outweighs the savings.
+    let excess = output.capacity() - output.len();
+    if excess > 4096 {
+        output.shrink_to_fit();
+    }
 
     Ok((atoms::ok(), output, had_errors))
 }
