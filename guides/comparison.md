@@ -7,7 +7,7 @@ A comparison of Elixir character encoding libraries: `encoding_rs`, `codepagex`,
 | Feature | encoding_rs | codepagex | iconv |
 |---------|-------------|-----------|-------|
 | Implementation | Rust NIF | Pure Elixir | Erlang NIF (C) |
-| Encoding Support | 40 encodings, 200+ aliases (WHATWG) | ~50 | System-dependent |
+| Decoding Support | 40 encodings, 200+ aliases (WHATWG) | ~50 | System-dependent |
 | Streaming API | ✅ Yes | ❌ No | ❌ No |
 | Batch Operations | ✅ Yes | ❌ No | ❌ No |
 | BOM Detection | ✅ Yes | ❌ No | ❌ No |
@@ -43,7 +43,6 @@ open bench/output/*.html  # View interactive HTML reports
 The benchmarks use encoding-specific character sets to ensure fair comparison:
 - **iso-8859-1**: 60% ASCII + 40% Latin-1 supplement (accented chars)
 - **shift_jis**: 40% ASCII + 30% Hiragana + 30% Katakana
-- **utf-16le**: 40% ASCII + 20% Latin-1 + 20% Hiragana + 20% CJK
 
 This ensures all characters can be encoded without replacement, exercising realistic code paths.
 
@@ -78,17 +77,6 @@ This ensures all characters can be encoded without replacement, exercising reali
 | Decode | 100 B | 0.35 μs | 2.3 μs | 6.5x |
 | Decode | 10 KB | 13 μs | 196 μs | 15x |
 | Decode | 1 MB | 3.4 ms | 21 ms | 6.3x |
-
-**UTF-16LE - encoding_rs vs iconv:**
-
-| Operation | Input Size | encoding_rs | iconv | Speedup |
-|-----------|------------|-------------|-------|---------|
-| Encode | 100 B | 0.31 μs | 1.8 μs | 5.8x |
-| Encode | 10 KB | 7.7 μs | 116 μs | 15x |
-| Encode | 1 MB | 2.8 ms | 11.9 ms | 4.2x |
-| Decode | 100 B | 0.33 μs | 1.7 μs | 5.1x |
-| Decode | 10 KB | 8.1 μs | 98 μs | 12x |
-| Decode | 1 MB | 0.83 ms | 10.4 ms | 12.5x |
 
 *Run `mix run bench/comparison_bench.exs` to generate results for your system.*
 
@@ -195,12 +183,12 @@ encoded = :iconv.convert("UTF-8", "WINDOWS-1252", utf8)
 
 ```elixir
 # Create decoder for chunked data
-decoder = EncodingRs.Decoder.new("shift_jis")
+{:ok, decoder} = EncodingRs.Decoder.new("shift_jis")
 
 # Process chunks (handles split multibyte characters)
-{:ok, chunk1, decoder} = EncodingRs.Decoder.decode_chunk(decoder, data1)
-{:ok, chunk2, decoder} = EncodingRs.Decoder.decode_chunk(decoder, data2)
-{:ok, final} = EncodingRs.Decoder.finish(decoder)
+{:ok, chunk1, errors1} = EncodingRs.Decoder.decode_chunk(decoder, data1, false)
+{:ok, chunk2, errors2} = EncodingRs.Decoder.decode_chunk(decoder, data2, false)
+{:ok, final, errors3} = EncodingRs.Decoder.decode_chunk(decoder, data3, true)
 ```
 
 ### Batch Operations (encoding_rs only)
@@ -210,7 +198,7 @@ decoder = EncodingRs.Decoder.new("shift_jis")
 items = [
   {"data1", "windows-1252"},
   {"data2", "shift_jis"},
-  {"data3", "utf-16le"}
+  {<<0x48, 0x00>>, "utf-16le"}
 ]
 results = EncodingRs.decode_batch(items)
 ```

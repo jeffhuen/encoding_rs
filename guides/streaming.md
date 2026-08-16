@@ -82,6 +82,19 @@ defmodule DataImporter do
 end
 ```
 
+To keep the rest of a pipeline string-only, inspect the tuple once and return
+the chunk from that boundary:
+
+```elixir
+chunks
+|> EncodingRs.Decoder.stream_with_errors(encoding)
+|> Stream.map(fn {chunk, had_errors} ->
+  if had_errors, do: Logger.warning("Invalid bytes detected")
+  chunk
+end)
+|> downstream_pipeline()
+```
+
 ### GenServer for Continuous Stream Processing
 
 ```elixir
@@ -168,30 +181,29 @@ File.stream!(path, [], 256 * 1024)
 | Scenario | Approach |
 |----------|----------|
 | Small files (<1MB) | `EncodingRs.decode/2` |
-| Large files | `EncodingRs.Decoder.stream/2` |
-| Files > 100MB | `EncodingRs.Decoder.stream/2` (avoids input size limit) |
+| Large files | `EncodingRs.Decoder.stream/3` |
+| Files > 100MB | `EncodingRs.Decoder.stream/3` (validates each chunk) |
 | Network streams | `EncodingRs.Decoder` |
-| Unknown size | `EncodingRs.Decoder.stream/2` |
-| Memory-constrained | `EncodingRs.Decoder.stream/2` |
-| Untrusted input | `EncodingRs.Decoder.stream/2` (bounded chunk sizes) |
+| Unknown size | `EncodingRs.Decoder.stream/3` |
+| Memory-constrained | `EncodingRs.Decoder.stream/3` |
+| Untrusted input | `EncodingRs.Decoder.stream/3` with bounded chunks |
 
 ### Input Size Limit
 
-One-shot operations (`EncodingRs.decode/2`, `EncodingRs.encode/2`) enforce a configurable maximum input size (default 100MB) to prevent excessive memory allocation. Inputs exceeding this limit return `{:error, :input_too_large}`.
+One-shot operations (`EncodingRs.decode/3`, `EncodingRs.encode/3`) enforce a maximum input size (default 100MB) to prevent excessive memory allocation. Inputs exceeding this limit return `{:error, :input_too_large}`.
 
 The streaming decoder is not affected by this limit at the file level because each chunk is validated independently. As long as your chunk size is below the limit (and it should be — 64KB to 256KB is typical), the streaming API can process files of any size.
 
-If you need to one-shot decode inputs larger than 100MB, you can adjust the limit at runtime:
+If you need to one-shot decode inputs larger than 100MB, override the limit for that operation:
 
 ```elixir
-# In config/runtime.exs
-config :encoding_rs, max_input_size: 500 * 1024 * 1024
+EncodingRs.decode(data, "utf-8", max_input_size: 500 * 1024 * 1024)
 
-# Or disable entirely for trusted inputs
-config :encoding_rs, max_input_size: :infinity
+# Or disable the limit for trusted inputs
+EncodingRs.decode(data, "utf-8", max_input_size: :infinity)
 ```
 
-See `EncodingRs.max_input_size/0` for details.
+See `EncodingRs.max_input_size/1` for details.
 
 ## Common Encodings
 
@@ -210,7 +222,7 @@ See `EncodingRs.max_input_size/0` for details.
 
 2. **Don't share decoders**: Each decoder maintains mutable state. Don't share across processes.
 
-3. **Check for errors**: Use `stream_with_errors/2` if you need to know about invalid byte sequences.
+3. **Check for errors**: Use `stream_with_errors/3` to track replacement characters. Use `new/1` and `decode_chunk/4` when decoder errors must be handled without exceptions.
 
 4. **BOM detection**: For files with BOMs, detect and strip first:
    ```elixir

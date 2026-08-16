@@ -20,6 +20,12 @@ defmodule EncodingRs.Native do
   def decode_normal(_binary, _encoding), do: :erlang.nif_error(:nif_not_loaded)
   def decode_dirty(_binary, _encoding), do: :erlang.nif_error(:nif_not_loaded)
 
+  def decode_with_details_normal(_binary, _encoding),
+    do: :erlang.nif_error(:nif_not_loaded)
+
+  def decode_with_details_dirty(_binary, _encoding),
+    do: :erlang.nif_error(:nif_not_loaded)
+
   # Encode functions (normal and dirty scheduler versions)
   def encode_normal(_string, _encoding), do: :erlang.nif_error(:nif_not_loaded)
   def encode_dirty(_string, _encoding), do: :erlang.nif_error(:nif_not_loaded)
@@ -38,6 +44,10 @@ defmodule EncodingRs.Native do
     do: :erlang.nif_error(:nif_not_loaded)
 
   # Batch operations
+  def decode_batch_normal(_items), do: :erlang.nif_error(:nif_not_loaded)
   def decode_batch(_items), do: :erlang.nif_error(:nif_not_loaded)
+  def decode_batch_with_details_normal(_items), do: :erlang.nif_error(:nif_not_loaded)
+  def decode_batch_with_details(_items), do: :erlang.nif_error(:nif_not_loaded)
+  def encode_batch_normal(_items), do: :erlang.nif_error(:nif_not_loaded)
   def encode_batch(_items), do: :erlang.nif_error(:nif_not_loaded)
 end

@@ -46,6 +46,22 @@ defmodule EncodingRsTest do
     end
   end
 
+  describe "decode_with_details/2" do
+    test "reports replacement errors and the encoding selected by a BOM" do
+      assert {:ok, "�", "UTF-8", true} ==
+               EncodingRs.decode_with_details(<<0xFF>>, "utf-8")
+
+      assert {:ok, "H", "UTF-16LE", false} ==
+               EncodingRs.decode_with_details(
+                 <<0xFF, 0xFE, 0x48, 0x00>>,
+                 "windows-1252"
+               )
+
+      assert {:ok, "H"} ==
+               EncodingRs.decode(<<0xFF, 0xFE, 0x48, 0x00>>, "windows-1252")
+    end
+  end
+
   describe "encode/2" do
     test "encodes to Windows-1251 (Cyrillic)" do
       assert {:ok, <<158, 232, 240, 232, 235, 232, 246, 224>>} ==
@@ -58,6 +74,19 @@ defmodule EncodingRsTest do
 
     test "returns error for unknown encoding" do
       assert {:error, :unknown_encoding} == EncodingRs.encode("hello", "not-an-encoding")
+    end
+
+    test "rejects decode-only encodings instead of silently returning UTF-8" do
+      for encoding <- ["utf-16le", "utf-16be", "replacement"] do
+        assert {:error, :encoder_unavailable} == EncodingRs.encode("hello", encoding)
+      end
+
+      assert [{:error, :encoder_unavailable}] ==
+               EncodingRs.encode_batch([{"hello", "utf-16le"}])
+
+      assert_raise ArgumentError, ~r/encoding is decode-only/, fn ->
+        EncodingRs.encode!("hello", "utf-16le")
+      end
     end
   end
 
@@ -88,6 +117,12 @@ defmodule EncodingRsTest do
     end
   end
 
+  describe "available?/0" do
+    test "returns true when the NIF is loaded" do
+      assert EncodingRs.available?()
+    end
+  end
+
   describe "canonical_name/1" do
     test "returns canonical name for aliases" do
       assert {:ok, "UTF-8"} == EncodingRs.canonical_name("utf-8")
@@ -110,9 +145,55 @@ defmodule EncodingRsTest do
     end
   end
 
-  describe "dirty_threshold/0" do
-    test "returns threshold value" do
+  describe "operation options" do
+    test "returns defaults and accepts per-call limits" do
       assert EncodingRs.dirty_threshold() == 64 * 1024
+      assert EncodingRs.max_input_size() == 100 * 1024 * 1024
+      assert EncodingRs.dirty_threshold(dirty_threshold: 0) == 0
+      assert EncodingRs.max_input_size(max_input_size: :infinity) == :infinity
+
+      assert {:ok, "hello"} =
+               EncodingRs.decode("hello", "utf-8",
+                 dirty_threshold: 0,
+                 max_input_size: :infinity
+               )
+
+      assert {:ok, "hello"} =
+               EncodingRs.encode("hello", "utf-8",
+                 dirty_threshold: 0,
+                 max_input_size: :infinity
+               )
+    end
+
+    test "rejects invalid options" do
+      for opts <- [
+            [max_input_size: "100"],
+            [max_input_size: -1],
+            [max_input_size: :disabled],
+            [dirty_threshold: "64"],
+            [dirty_threshold: -1]
+          ] do
+        assert_raise ArgumentError, fn -> EncodingRs.max_input_size(opts) end
+      end
+
+      assert_raise ArgumentError, fn ->
+        EncodingRs.max_input_size(unknown: true)
+      end
+    end
+
+    test "keeps application config as a fallback" do
+      previous = Application.fetch_env(:encoding_rs, :max_input_size)
+
+      on_exit(fn ->
+        case previous do
+          {:ok, value} -> Application.put_env(:encoding_rs, :max_input_size, value)
+          :error -> Application.delete_env(:encoding_rs, :max_input_size)
+        end
+      end)
+
+      Application.put_env(:encoding_rs, :max_input_size, 4)
+      assert {:error, :input_too_large} = EncodingRs.decode("hello", "utf-8")
+      assert {:ok, "hello"} = EncodingRs.decode("hello", "utf-8", max_input_size: 5)
     end
   end
 
@@ -339,6 +420,26 @@ defmodule EncodingRsTest do
   end
 
   describe "batch roundtrip" do
+    test "batch operations honor the aggregate dirty threshold" do
+      decode_items = [{"a", "utf-8"}, {"b", "utf-8"}, {"c", "utf-8"}]
+      encode_items = [{"a", "windows-1252"}, {"b", "windows-1252"}]
+
+      for dirty_threshold <- [0, 1024] do
+        opts = [dirty_threshold: dirty_threshold]
+
+        assert [{:ok, "a"}, {:ok, "b"}, {:ok, "c"}] =
+                 EncodingRs.decode_batch(decode_items, opts)
+
+        assert [
+                 {:ok, "a", "UTF-8", false},
+                 {:ok, "b", "UTF-8", false},
+                 {:ok, "c", "UTF-8", false}
+               ] = EncodingRs.decode_batch_with_details(decode_items, opts)
+
+        assert [{:ok, "a"}, {:ok, "b"}] = EncodingRs.encode_batch(encode_items, opts)
+      end
+    end
+
     test "encode_batch then decode_batch returns original" do
       original_strings = ["Hello", "World", "こんにちは", "你好"]
       encoding = "utf-8"
@@ -403,125 +504,35 @@ defmodule EncodingRsTest do
     end
   end
 
-  describe "max_input_size/0" do
-    test "returns configured max input size" do
-      assert EncodingRs.max_input_size() == 100 * 1024 * 1024
-    end
-  end
-
-  describe "max_input_size configuration" do
-    test "supports :infinity to disable the limit" do
-      original = Application.get_env(:encoding_rs, :max_input_size)
-
-      try do
-        Application.put_env(:encoding_rs, :max_input_size, :infinity)
-        assert EncodingRs.max_input_size() == :infinity
-
-        # A normal-sized input should succeed (verifies :infinity code path works)
-        assert {:ok, _} = EncodingRs.decode(<<72, 101, 108, 108, 111>>, "utf-8")
-        assert {:ok, _} = EncodingRs.encode("Hello", "utf-8")
-      after
-        if original == nil do
-          Application.delete_env(:encoding_rs, :max_input_size)
-        else
-          Application.put_env(:encoding_rs, :max_input_size, original)
-        end
-      end
-    end
-
-    test "raises ArgumentError for invalid config values" do
-      original = Application.get_env(:encoding_rs, :max_input_size)
-
-      try do
-        Application.put_env(:encoding_rs, :max_input_size, "100")
-
-        assert_raise ArgumentError, ~r/non-negative integer or :infinity/, fn ->
-          EncodingRs.max_input_size()
-        end
-
-        Application.put_env(:encoding_rs, :max_input_size, -1)
-
-        assert_raise ArgumentError, ~r/non-negative integer or :infinity/, fn ->
-          EncodingRs.max_input_size()
-        end
-
-        Application.put_env(:encoding_rs, :max_input_size, :disabled)
-
-        assert_raise ArgumentError, ~r/non-negative integer or :infinity/, fn ->
-          EncodingRs.max_input_size()
-        end
-      after
-        if original == nil do
-          Application.delete_env(:encoding_rs, :max_input_size)
-        else
-          Application.put_env(:encoding_rs, :max_input_size, original)
-        end
-      end
-    end
-
-    test ":infinity disables size validation for batch operations" do
-      original = Application.get_env(:encoding_rs, :max_input_size)
-
-      try do
-        Application.put_env(:encoding_rs, :max_input_size, :infinity)
-
-        items = [{<<72>>, "utf-8"}, {<<73>>, "utf-8"}]
-        results = EncodingRs.decode_batch(items)
-        assert [{:ok, "H"}, {:ok, "I"}] = results
-      after
-        if original == nil do
-          Application.delete_env(:encoding_rs, :max_input_size)
-        else
-          Application.put_env(:encoding_rs, :max_input_size, original)
-        end
-      end
-    end
-  end
-
   describe "input size validation" do
-    @tag :slow
-    test "decode/2 rejects oversized input" do
-      big = :binary.copy(<<0>>, EncodingRs.max_input_size() + 1)
-      assert {:error, :input_too_large} = EncodingRs.decode(big, "utf-8")
+    test "one-shot operations reject oversized input" do
+      assert {:error, :input_too_large} =
+               EncodingRs.decode("hello", "utf-8", max_input_size: 4)
+
+      assert {:error, :input_too_large} =
+               EncodingRs.encode("hello", "utf-8", max_input_size: 4)
+
+      assert {:ok, "hello"} =
+               EncodingRs.decode("hello", "utf-8", max_input_size: :infinity)
     end
 
-    @tag :slow
-    test "encode/2 rejects oversized input" do
-      big = String.duplicate("a", EncodingRs.max_input_size() + 1)
-      assert {:error, :input_too_large} = EncodingRs.encode(big, "utf-8")
-    end
-
-    @tag :slow
-    test "decode!/2 raises for oversized input" do
-      big = :binary.copy(<<0>>, EncodingRs.max_input_size() + 1)
+    test "bang operations raise for oversized input" do
+      assert_raise ArgumentError, ~r/exceeds maximum size/, fn ->
+        EncodingRs.decode!("hello", "utf-8", max_input_size: 4)
+      end
 
       assert_raise ArgumentError, ~r/exceeds maximum size/, fn ->
-        EncodingRs.decode!(big, "utf-8")
+        EncodingRs.encode!("hello", "utf-8", max_input_size: 4)
       end
     end
 
-    @tag :slow
-    test "encode!/2 raises for oversized input" do
-      big = String.duplicate("a", EncodingRs.max_input_size() + 1)
-
-      assert_raise ArgumentError, ~r/exceeds maximum size/, fn ->
-        EncodingRs.encode!(big, "utf-8")
-      end
-    end
-
-    @tag :slow
-    test "decode_batch/1 rejects oversized items individually" do
-      big = :binary.copy(<<0>>, EncodingRs.max_input_size() + 1)
-      items = [{<<72>>, "utf-8"}, {big, "utf-8"}, {<<73>>, "utf-8"}]
-      results = EncodingRs.decode_batch(items)
+    test "batch operations reject oversized items individually" do
+      items = [{<<72>>, "utf-8"}, {"too big", "utf-8"}, {<<73>>, "utf-8"}]
+      results = EncodingRs.decode_batch(items, max_input_size: 4)
       assert [{:ok, "H"}, {:error, :input_too_large}, {:ok, "I"}] = results
-    end
 
-    @tag :slow
-    test "encode_batch/1 rejects oversized items individually" do
-      big = String.duplicate("a", EncodingRs.max_input_size() + 1)
-      items = [{"H", "utf-8"}, {big, "utf-8"}, {"I", "utf-8"}]
-      results = EncodingRs.encode_batch(items)
+      items = [{"H", "utf-8"}, {"too big", "utf-8"}, {"I", "utf-8"}]
+      results = EncodingRs.encode_batch(items, max_input_size: 4)
       assert [{:ok, "H"}, {:error, :input_too_large}, {:ok, "I"}] = results
     end
   end

@@ -3,67 +3,30 @@ defmodule EncodingRs do
   High-performance string encoding/decoding using Rust's `encoding_rs` crate.
 
   This library provides fast character encoding conversion using the same
-  encoding library that powers Firefox. It supports all encodings in the
-  WHATWG Encoding Standard.
+  encoding library that powers Firefox. It decodes all encodings in the WHATWG
+  Encoding Standard and encodes their output encodings.
 
   ## Features
 
   - **High performance**: Uses `encoding_rs`, the same library used by Firefox
   - **Dirty schedulers**: Large binaries automatically use dirty CPU schedulers
-    to avoid blocking the BEAM (configurable threshold, default 64KB)
+    to avoid blocking the BEAM (default threshold: 64KB)
   - **Safe error handling**: Returns `{:ok, result}` or `{:error, reason}` tuples
-  - **WHATWG compliant**: Supports all encodings from the WHATWG Encoding Standard
+  - **WHATWG compliant**: Implements the WHATWG decoding and encoding algorithms
 
-  ## Configuration
+  ## Operation options
 
-  ### Dirty Scheduler Threshold (compile-time)
+  Encoding, decoding, batch, and streaming functions accept per-call options:
 
-  The dirty scheduler threshold controls when operations are moved to dirty CPU
-  schedulers. The BEAM VM has a limited number of normal schedulers, and long-running
-  NIFs can block them, causing latency for other processes. By offloading large
-  encoding/decoding operations to dirty schedulers, the normal schedulers remain
-  available for other work.
+  - `:dirty_threshold` — byte size above which dirty CPU schedulers are used
+    (default: 65,536).
+  - `:max_input_size` — maximum input or chunk size (default: 104,857,600).
+    Set it to `:infinity` only for trusted, externally bounded input.
 
-  Configure in your `config.exs`:
-
-      # Using multiplication for readability
-      config :encoding_rs, dirty_threshold: 128 * 1024
-
-      # Or using Elixir's underscore notation
-      config :encoding_rs, dirty_threshold: 131_072
-
-  The default is 64KB (65,536 bytes). This is a **compile-time** setting.
-
-  **Increasing the threshold** reduces context switching overhead, which benefits
-  batch processing and throughput-focused workloads. However, larger operations
-  will block normal schedulers longer, potentially causing latency for other processes.
-
-  **Decreasing the threshold** keeps normal schedulers more available, which benefits
-  latency-sensitive and high-concurrency applications. However, more frequent context
-  switching adds overhead that may reduce throughput.
-
-  ### Maximum Input Size (runtime)
-
-  A configurable safety limit on the maximum input size accepted by encoding/decoding
-  operations. Inputs exceeding this limit return `{:error, :input_too_large}` before
-  reaching the NIF. This guards against excessive memory allocation — a single large
-  input can cause up to 3x memory amplification in the NIF (input buffer + output
-  buffer + BEAM binary copy).
-
-  Configure in your `config.exs` or `runtime.exs`:
-
-      config :encoding_rs, max_input_size: 200 * 1024 * 1024
-
-  The default is 100MB (104,857,600 bytes). This is a **runtime** setting — it can
-  be changed without recompiling.
-
-  Set to `:infinity` to disable the limit entirely:
-
-      # Trusted environment — no size cap
-      config :encoding_rs, max_input_size: :infinity
-
-  The value must be a non-negative integer or `:infinity`. Invalid values
-  (e.g., strings, negative numbers) will raise an `ArgumentError` on first use.
+      EncodingRs.decode(data, "shift_jis",
+        dirty_threshold: 128 * 1024,
+        max_input_size: 10 * 1024 * 1024
+      )
 
   > #### Warning {: .warning}
   >
@@ -73,11 +36,12 @@ defmodule EncodingRs do
   > input, prefer the streaming decoder (`EncodingRs.Decoder`) with bounded
   > chunk sizes.
 
-  See `max_input_size/0` for more details.
+  New code should prefer explicit options. Existing application configuration
+  remains supported as a compatibility fallback.
 
   ## Supported Encodings
 
-  * UTF-8, UTF-16LE, UTF-16BE
+  * UTF-8 (encode/decode); UTF-16LE and UTF-16BE (decode only)
   * Windows code pages: 874, 1250-1258, 949, 932
   * ISO-8859 family: 2, 3, 4, 5, 6, 7, 8, 8-I, 10, 13, 14, 15, 16
   * IBM866
@@ -109,22 +73,43 @@ defmodule EncodingRs do
 
   alias EncodingRs.Native
 
-  # Configuration
-  @dirty_threshold Application.compile_env(:encoding_rs, :dirty_threshold, 64 * 1024)
+  @default_dirty_threshold Application.compile_env(
+                             :encoding_rs,
+                             :dirty_threshold,
+                             64 * 1024
+                           )
   @default_max_input_size 100 * 1024 * 1024
+  @option_keys [:dirty_threshold, :max_input_size]
+
+  unless is_integer(@default_dirty_threshold) and @default_dirty_threshold >= 0 do
+    raise ArgumentError,
+          "expected :dirty_threshold to be a non-negative integer, got: #{inspect(@default_dirty_threshold)}"
+  end
 
   # Types
 
   @typedoc """
   An encoding label string (e.g., `"utf-8"`, `"shift_jis"`, `"windows-1252"`).
 
-  See `list_encodings/0` for all supported encodings, or check the
+  See `list_encodings/0` for all recognized encodings, or check the
   [WHATWG Encoding Standard](https://encoding.spec.whatwg.org/#names-and-labels).
   """
   @type encoding :: String.t()
 
+  @typedoc "Per-operation scheduler and input-size options."
+  @type options :: [
+          {:dirty_threshold, non_neg_integer()}
+          | {:max_input_size, non_neg_integer() | :infinity}
+        ]
+
   @typedoc "Error reason atoms returned by encoding/decoding functions."
-  @type error_reason :: :unknown_encoding | :no_bom | :input_too_large
+  @type error_reason ::
+          :unknown_encoding | :encoder_unavailable | :no_bom | :input_too_large
+
+  @typedoc "Detailed one-shot decode result, including BOM selection and replacements."
+  @type decode_details_result ::
+          {:ok, String.t(), actual_encoding :: encoding(), had_errors :: boolean()}
+          | {:error, :unknown_encoding | :input_too_large}
 
   @typedoc "Result of BOM detection: encoding name and BOM length in bytes."
   @type bom_result :: {:ok, encoding(), bom_length :: non_neg_integer()} | {:error, :no_bom}
@@ -137,8 +122,12 @@ defmodule EncodingRs do
   Returns `{:ok, binary}` on success, or `{:error, reason}` on failure.
   Unmappable characters are replaced with a suitable fallback character.
 
-  Automatically uses dirty CPU schedulers for strings larger than the
-  configured threshold (see `dirty_threshold/0`).
+  UTF-16LE and UTF-16BE are decode-only in the WHATWG Encoding Standard.
+  Those labels and `replacement` return `{:error, :encoder_unavailable}`;
+  this function never returns bytes in a different encoding than requested.
+
+  Automatically uses dirty CPU schedulers for strings larger than the selected
+  threshold (see `dirty_threshold/1`).
 
   ## Examples
 
@@ -149,11 +138,26 @@ defmodule EncodingRs do
       {:error, :unknown_encoding}
   """
   @spec encode(String.t(), encoding()) ::
-          {:ok, binary()} | {:error, :unknown_encoding | :input_too_large}
+          {:ok, binary()}
+          | {:error, :unknown_encoding | :encoder_unavailable | :input_too_large}
+  @spec encode(String.t(), encoding(), options()) ::
+          {:ok, binary()}
+          | {:error, :unknown_encoding | :encoder_unavailable | :input_too_large}
   def encode(string, encoding) when is_binary(string) and is_binary(encoding) do
-    with :ok <- validate_input_size(string) do
+    encode_native(string, encoding, @default_dirty_threshold, max_input_size())
+  end
+
+  def encode(string, encoding, opts)
+      when is_binary(string) and is_binary(encoding) and is_list(opts) do
+    {dirty_threshold, max_input_size} = options!(opts)
+
+    encode_native(string, encoding, dirty_threshold, max_input_size)
+  end
+
+  defp encode_native(string, encoding, dirty_threshold, max_input_size) do
+    with :ok <- validate_input_size(string, max_input_size) do
       string
-      |> route_nif(encoding, &Native.encode_normal/2, &Native.encode_dirty/2)
+      |> route_nif(encoding, &Native.encode_normal/2, &Native.encode_dirty/2, dirty_threshold)
       |> normalize_result()
     end
   end
@@ -172,28 +176,30 @@ defmodule EncodingRs do
       ** (ArgumentError) unknown encoding: invalid-encoding
   """
   @spec encode!(String.t(), encoding()) :: binary()
+  @spec encode!(String.t(), encoding(), options()) :: binary()
   def encode!(string, encoding) when is_binary(string) and is_binary(encoding) do
-    case encode(string, encoding) do
-      {:ok, binary} ->
-        binary
+    string
+    |> encode(encoding)
+    |> unwrap_result!(encoding, :default)
+  end
 
-      {:error, :unknown_encoding} ->
-        raise ArgumentError, "unknown encoding: #{encoding}"
-
-      {:error, :input_too_large} ->
-        raise ArgumentError,
-              "input exceeds maximum size of #{max_input_size()} bytes"
-    end
+  def encode!(string, encoding, opts)
+      when is_binary(string) and is_binary(encoding) and is_list(opts) do
+    string
+    |> encode(encoding, opts)
+    |> unwrap_result!(encoding, opts)
   end
 
   @doc """
   Decodes a binary from the specified encoding to a UTF-8 string.
 
   Returns `{:ok, string}` on success, or `{:error, reason}` on failure.
-  Unmappable bytes are replaced with the Unicode replacement character (U+FFFD).
+  Malformed byte sequences are replaced with the Unicode replacement character (U+FFFD).
+  An input BOM may override the requested encoding. Use `decode_with_details/3`
+  when either behavior must be observed.
 
-  Automatically uses dirty CPU schedulers for binaries larger than the
-  configured threshold (see `dirty_threshold/0`).
+  Automatically uses dirty CPU schedulers for binaries larger than the selected
+  threshold (see `dirty_threshold/1`).
 
   ## Examples
 
@@ -205,11 +211,83 @@ defmodule EncodingRs do
   """
   @spec decode(binary(), encoding()) ::
           {:ok, String.t()} | {:error, :unknown_encoding | :input_too_large}
+  @spec decode(binary(), encoding(), options()) ::
+          {:ok, String.t()} | {:error, :unknown_encoding | :input_too_large}
   def decode(binary, encoding) when is_binary(binary) and is_binary(encoding) do
-    with :ok <- validate_input_size(binary) do
-      binary
-      |> route_nif(encoding, &Native.decode_normal/2, &Native.decode_dirty/2)
-      |> normalize_result()
+    binary
+    |> decode_native(
+      encoding,
+      &Native.decode_normal/2,
+      &Native.decode_dirty/2,
+      @default_dirty_threshold,
+      max_input_size()
+    )
+    |> normalize_result()
+  end
+
+  def decode(binary, encoding, opts)
+      when is_binary(binary) and is_binary(encoding) and is_list(opts) do
+    {dirty_threshold, max_input_size} = options!(opts)
+
+    binary
+    |> decode_native(
+      encoding,
+      &Native.decode_normal/2,
+      &Native.decode_dirty/2,
+      dirty_threshold,
+      max_input_size
+    )
+    |> normalize_result()
+  end
+
+  @doc """
+  Decodes a complete binary and reports the encoding actually used and whether
+  malformed input was replaced with U+FFFD.
+
+  The actual encoding can differ from the requested label when the input starts
+  with a UTF-8 or UTF-16 BOM.
+
+  ## Examples
+
+      iex> EncodingRs.decode_with_details(<<0xFF>>, "utf-8")
+      {:ok, "�", "UTF-8", true}
+
+      iex> EncodingRs.decode_with_details(<<0xFF, 0xFE, 0x48, 0x00>>, "windows-1252")
+      {:ok, "H", "UTF-16LE", false}
+  """
+  @spec decode_with_details(binary(), encoding()) :: decode_details_result()
+  @spec decode_with_details(binary(), encoding(), options()) :: decode_details_result()
+  def decode_with_details(binary, encoding)
+      when is_binary(binary) and is_binary(encoding) do
+    binary
+    |> decode_native(
+      encoding,
+      &Native.decode_with_details_normal/2,
+      &Native.decode_with_details_dirty/2,
+      @default_dirty_threshold,
+      max_input_size()
+    )
+    |> normalize_decode_details()
+  end
+
+  def decode_with_details(binary, encoding, opts)
+      when is_binary(binary) and is_binary(encoding) and is_list(opts) do
+    {dirty_threshold, max_input_size} = options!(opts)
+
+    binary
+    |> decode_native(
+      encoding,
+      &Native.decode_with_details_normal/2,
+      &Native.decode_with_details_dirty/2,
+      dirty_threshold,
+      max_input_size
+    )
+    |> normalize_decode_details()
+  end
+
+  defp decode_native(binary, encoding, normal_fn, dirty_fn, dirty_threshold, max_input_size) do
+    with :ok <- validate_input_size(binary, max_input_size) do
+      route_nif(binary, encoding, normal_fn, dirty_fn, dirty_threshold)
     end
   end
 
@@ -227,22 +305,24 @@ defmodule EncodingRs do
       ** (ArgumentError) unknown encoding: invalid-encoding
   """
   @spec decode!(binary(), encoding()) :: String.t()
+  @spec decode!(binary(), encoding(), options()) :: String.t()
   def decode!(binary, encoding) when is_binary(binary) and is_binary(encoding) do
-    case decode(binary, encoding) do
-      {:ok, string} ->
-        string
+    binary
+    |> decode(encoding)
+    |> unwrap_result!(encoding, :default)
+  end
 
-      {:error, :unknown_encoding} ->
-        raise ArgumentError, "unknown encoding: #{encoding}"
-
-      {:error, :input_too_large} ->
-        raise ArgumentError,
-              "input exceeds maximum size of #{max_input_size()} bytes"
-    end
+  def decode!(binary, encoding, opts)
+      when is_binary(binary) and is_binary(encoding) and is_list(opts) do
+    binary
+    |> decode(encoding, opts)
+    |> unwrap_result!(encoding, opts)
   end
 
   @doc """
-  Checks if an encoding label is valid and supported.
+  Checks if an encoding label is recognized for decoding.
+
+  This returns `true` for decode-only labels such as UTF-16LE and UTF-16BE.
 
   ## Examples
 
@@ -258,6 +338,24 @@ defmodule EncodingRs do
   @spec encoding_exists?(encoding()) :: boolean()
   def encoding_exists?(encoding) when is_binary(encoding) do
     Native.encoding_exists(encoding)
+  end
+
+  @doc """
+  Returns whether the native implementation is loaded and callable.
+
+  This check never raises when the NIF is unavailable, allowing applications
+  to disable optional encoding features cleanly.
+
+  ## Examples
+
+      iex> EncodingRs.available?()
+      true
+  """
+  @spec available?() :: boolean()
+  def available? do
+    Native.encoding_exists("utf-8")
+  catch
+    :error, reason when reason in [:nif_not_loaded, :undef] -> false
   end
 
   @doc """
@@ -286,7 +384,7 @@ defmodule EncodingRs do
   end
 
   @doc """
-  Returns a list of all supported encoding names.
+  Returns all recognized encoding names, including decode-only encodings.
 
   ## Examples
 
@@ -309,15 +407,8 @@ defmodule EncodingRs do
   schedulers. This prevents long-running encoding operations from causing
   latency for other processes.
 
-  This value can be configured in your `config.exs`:
-
-      # Using multiplication for readability
-      config :encoding_rs, dirty_threshold: 128 * 1024
-
-      # Or using Elixir's underscore notation
-      config :encoding_rs, dirty_threshold: 131_072
-
-  The default is 64KB (65,536 bytes).
+  Pass `:dirty_threshold` to an operation to override the 64KB default for that
+  call. The value must be a non-negative integer.
 
   ## Examples
 
@@ -325,8 +416,12 @@ defmodule EncodingRs do
       65536
   """
   @spec dirty_threshold() :: non_neg_integer()
-  def dirty_threshold do
-    @dirty_threshold
+  @spec dirty_threshold(options()) :: non_neg_integer()
+  def dirty_threshold, do: @default_dirty_threshold
+
+  def dirty_threshold(opts) when is_list(opts) do
+    {dirty_threshold, _max_input_size} = options!(opts)
+    dirty_threshold
   end
 
   @doc """
@@ -336,23 +431,15 @@ defmodule EncodingRs do
   of being passed to the NIF. This prevents excessive memory allocation from
   untrusted or unexpectedly large inputs.
 
-  This value is read at **runtime** via `Application.get_env/3`, so it can be
-  changed in `runtime.exs` or dynamically with `Application.put_env/3` without
-  recompiling the library.
-
-  Configure in your `config.exs` or `runtime.exs`:
-
-      config :encoding_rs, max_input_size: 200 * 1024 * 1024
-
-  The default is 100MB (104,857,600 bytes).
+  Pass `:max_input_size` to an operation to override the 100MB default for that
+  call.
 
   Set to `:infinity` to disable the size limit entirely. This is appropriate for
   trusted environments where inputs are known to be safe, but should be avoided
   when processing untrusted data — a large input can cause memory amplification
   of up to 3x in the NIF (input buffer + output buffer + BEAM binary copy).
 
-      # Disable size limit (trusted inputs only)
-      config :encoding_rs, max_input_size: :infinity
+      EncodingRs.decode(data, "utf-8", max_input_size: :infinity)
 
   The value must be a non-negative integer or `:infinity`. Invalid values
   (e.g., strings, negative numbers) will raise an `ArgumentError` on first use.
@@ -363,19 +450,17 @@ defmodule EncodingRs do
       104857600
   """
   @spec max_input_size() :: non_neg_integer() | :infinity
-  def max_input_size do
-    case Application.get_env(:encoding_rs, :max_input_size, @default_max_input_size) do
-      :infinity ->
-        :infinity
+  @spec max_input_size(options()) :: non_neg_integer() | :infinity
+  def max_input_size, do: configured_max_input_size!()
 
-      value when is_integer(value) and value >= 0 ->
-        value
-
-      other ->
-        raise ArgumentError,
-              "expected :max_input_size to be a non-negative integer or :infinity, got: #{inspect(other)}"
-    end
+  def max_input_size(opts) when is_list(opts) do
+    {_dirty_threshold, max_input_size} = options!(opts)
+    max_input_size
   end
+
+  @doc false
+  @spec resolve_options(options()) :: {non_neg_integer(), non_neg_integer() | :infinity}
+  def resolve_options(opts) when is_list(opts), do: options!(opts)
 
   # Batch operations
 
@@ -386,7 +471,9 @@ defmodule EncodingRs do
   @type encode_batch_item :: {String.t(), encoding()}
 
   @typedoc "Result from batch operations"
-  @type batch_result(t) :: {:ok, t} | {:error, :unknown_encoding | :input_too_large}
+  @type batch_result(t) ::
+          {:ok, t}
+          | {:error, :unknown_encoding | :encoder_unavailable | :input_too_large}
 
   @doc """
   Decodes multiple binaries in a single NIF call.
@@ -396,8 +483,8 @@ defmodule EncodingRs do
 
   Results are returned in the same order as the input items.
 
-  **Note:** Batch operations always use dirty CPU schedulers, regardless of
-  input size. See the [Batch Processing Guide](batch.md) for details.
+  The combined byte size determines whether the batch uses a normal or dirty
+  CPU scheduler. See the [Batch Processing Guide](batch.md) for details.
 
   ## Arguments
 
@@ -418,18 +505,91 @@ defmodule EncodingRs do
       [{:error, :unknown_encoding}]
   """
   @spec decode_batch([decode_batch_item()]) :: [batch_result(String.t())]
+  @spec decode_batch([decode_batch_item()], options()) :: [batch_result(String.t())]
   def decode_batch(items) when is_list(items) do
-    {oversized_indices, valid_items} =
-      split_by_size(items, fn {binary, _enc} -> byte_size(binary) end)
+    run_decode_batch(
+      items,
+      @default_dirty_threshold,
+      max_input_size(),
+      &Native.decode_batch_normal/1,
+      &Native.decode_batch/1,
+      &normalize_result/1
+    )
+  end
+
+  def decode_batch(items, opts) when is_list(items) and is_list(opts) do
+    {dirty_threshold, max_input_size} = options!(opts)
+
+    run_decode_batch(
+      items,
+      dirty_threshold,
+      max_input_size,
+      &Native.decode_batch_normal/1,
+      &Native.decode_batch/1,
+      &normalize_result/1
+    )
+  end
+
+  @doc """
+  Decodes multiple binaries while reporting each actual encoding and whether
+  malformed input was replaced.
+
+  Results have the same order as the inputs. See `decode_with_details/3` for
+  the detailed success tuple.
+
+  ## Examples
+
+      iex> EncodingRs.decode_batch_with_details([{"hello", "utf-8"}, {<<0xFF>>, "utf-8"}])
+      [{:ok, "hello", "UTF-8", false}, {:ok, "�", "UTF-8", true}]
+  """
+  @spec decode_batch_with_details([decode_batch_item()]) :: [decode_details_result()]
+  @spec decode_batch_with_details([decode_batch_item()], options()) ::
+          [decode_details_result()]
+  def decode_batch_with_details(items) when is_list(items) do
+    run_decode_batch(
+      items,
+      @default_dirty_threshold,
+      max_input_size(),
+      &Native.decode_batch_with_details_normal/1,
+      &Native.decode_batch_with_details/1,
+      &normalize_decode_details/1
+    )
+  end
+
+  def decode_batch_with_details(items, opts) when is_list(items) and is_list(opts) do
+    {dirty_threshold, max_input_size} = options!(opts)
+
+    run_decode_batch(
+      items,
+      dirty_threshold,
+      max_input_size,
+      &Native.decode_batch_with_details_normal/1,
+      &Native.decode_batch_with_details/1,
+      &normalize_decode_details/1
+    )
+  end
+
+  defp run_decode_batch(
+         items,
+         dirty_threshold,
+         max_input_size,
+         normal_nif,
+         dirty_nif,
+         normalizer
+       ) do
+    {oversized_indices, valid_items, total_size} =
+      split_by_size(items, fn {binary, _enc} -> byte_size(binary) end, max_input_size)
 
     if valid_items == [] do
       List.duplicate({:error, :input_too_large}, length(items))
     else
+      nif = if total_size > dirty_threshold, do: dirty_nif, else: normal_nif
+
       nif_results =
         valid_items
         |> Enum.map(fn {item, _idx} -> item end)
-        |> Native.decode_batch()
-        |> Enum.map(&normalize_result/1)
+        |> nif.()
+        |> Enum.map(normalizer)
 
       merge_results(oversized_indices, valid_items, nif_results, length(items))
     end
@@ -443,8 +603,8 @@ defmodule EncodingRs do
 
   Results are returned in the same order as the input items.
 
-  **Note:** Batch operations always use dirty CPU schedulers, regardless of
-  input size. See the [Batch Processing Guide](batch.md) for details.
+  The combined byte size determines whether the batch uses a normal or dirty
+  CPU scheduler. See the [Batch Processing Guide](batch.md) for details.
 
   ## Arguments
 
@@ -452,8 +612,8 @@ defmodule EncodingRs do
 
   ## Returns
 
-  List of `{:ok, binary}`, `{:error, :unknown_encoding}`, or
-  `{:error, :input_too_large}` tuples.
+  List of `{:ok, binary}`, `{:error, :unknown_encoding}`,
+  `{:error, :encoder_unavailable}`, or `{:error, :input_too_large}` tuples.
 
   ## Examples
 
@@ -465,17 +625,32 @@ defmodule EncodingRs do
       [{:error, :unknown_encoding}]
   """
   @spec encode_batch([encode_batch_item()]) :: [batch_result(binary())]
+  @spec encode_batch([encode_batch_item()], options()) :: [batch_result(binary())]
   def encode_batch(items) when is_list(items) do
-    {oversized_indices, valid_items} =
-      split_by_size(items, fn {string, _enc} -> byte_size(string) end)
+    run_encode_batch(items, @default_dirty_threshold, max_input_size())
+  end
+
+  def encode_batch(items, opts) when is_list(items) and is_list(opts) do
+    {dirty_threshold, max_input_size} = options!(opts)
+    run_encode_batch(items, dirty_threshold, max_input_size)
+  end
+
+  defp run_encode_batch(items, dirty_threshold, max_input_size) do
+    {oversized_indices, valid_items, total_size} =
+      split_by_size(items, fn {string, _enc} -> byte_size(string) end, max_input_size)
 
     if valid_items == [] do
       List.duplicate({:error, :input_too_large}, length(items))
     else
+      nif =
+        if total_size > dirty_threshold,
+          do: &Native.encode_batch/1,
+          else: &Native.encode_batch_normal/1
+
       nif_results =
         valid_items
         |> Enum.map(fn {item, _idx} -> item end)
-        |> Native.encode_batch()
+        |> nif.()
         |> Enum.map(&normalize_result/1)
 
       merge_results(oversized_indices, valid_items, nif_results, length(items))
@@ -548,7 +723,7 @@ defmodule EncodingRs do
   def detect_and_strip_bom(data) when is_binary(data) do
     case detect_bom(data) do
       {:ok, encoding, bom_length} ->
-        <<_bom::binary-size(bom_length), rest::binary>> = data
+        <<_bom::binary-size(^bom_length), rest::binary>> = data
         {:ok, encoding, rest}
 
       {:error, :no_bom} ->
@@ -558,8 +733,8 @@ defmodule EncodingRs do
 
   # Private helpers
 
-  defp route_nif(input, encoding, normal_fn, dirty_fn) do
-    if byte_size(input) > @dirty_threshold do
+  defp route_nif(input, encoding, normal_fn, dirty_fn, dirty_threshold) do
+    if byte_size(input) > dirty_threshold do
       dirty_fn.(input, encoding)
     else
       normal_fn.(input, encoding)
@@ -567,30 +742,100 @@ defmodule EncodingRs do
   end
 
   defp normalize_result({:ok, value}), do: {:ok, value}
-  defp normalize_result({:error, _}), do: {:error, :unknown_encoding}
+  defp normalize_result({:error, reason}), do: normalize_error(reason)
 
-  defp validate_input_size(input) do
-    case max_input_size() do
+  defp unwrap_result!({:ok, value}, _encoding, _opts), do: value
+
+  defp unwrap_result!({:error, :unknown_encoding}, encoding, _opts) do
+    raise ArgumentError, "unknown encoding: #{encoding}"
+  end
+
+  defp unwrap_result!({:error, :encoder_unavailable}, encoding, _opts) do
+    raise ArgumentError, "encoding is decode-only: #{encoding}"
+  end
+
+  defp unwrap_result!({:error, :input_too_large}, _encoding, opts) do
+    raise ArgumentError,
+          "input exceeds maximum size of #{max_input_size_for_error(opts)} bytes"
+  end
+
+  defp max_input_size_for_error(:default), do: max_input_size()
+  defp max_input_size_for_error(opts), do: max_input_size(opts)
+
+  defp normalize_decode_details({:ok, value, actual_encoding, had_errors}),
+    do: {:ok, value, actual_encoding, had_errors}
+
+  defp normalize_decode_details({:error, reason, _actual_encoding, _had_errors}),
+    do: normalize_error(reason)
+
+  defp normalize_error(reason) when reason in ["", "unknown_encoding"],
+    do: {:error, :unknown_encoding}
+
+  defp normalize_error("encoder_unavailable"), do: {:error, :encoder_unavailable}
+
+  defp normalize_error(reason), do: {:error, reason}
+
+  defp validate_input_size(input, max_input_size) do
+    case max_input_size do
       :infinity -> :ok
       max when byte_size(input) <= max -> :ok
       _ -> {:error, :input_too_large}
     end
   end
 
-  defp split_by_size(items, size_fn) do
-    max = max_input_size()
-
-    {oversized, valid} =
+  defp split_by_size(items, size_fn, max) do
+    {oversized_indices, valid_items, total_size} =
       items
       |> Enum.with_index()
-      |> Enum.split_with(fn {item, _idx} -> max != :infinity and size_fn.(item) > max end)
+      |> Enum.reduce({MapSet.new(), [], 0}, fn {item, idx}, {oversized, valid, total} ->
+        size = size_fn.(item)
 
-    oversized_indices =
-      oversized
-      |> Enum.map(fn {_item, idx} -> idx end)
-      |> MapSet.new()
+        if max != :infinity and size > max do
+          {MapSet.put(oversized, idx), valid, total}
+        else
+          {oversized, [{item, idx} | valid], total + size}
+        end
+      end)
 
-    {oversized_indices, valid}
+    {oversized_indices, Enum.reverse(valid_items), total_size}
+  end
+
+  defp options!(opts) do
+    opts = Keyword.validate!(opts, @option_keys)
+
+    dirty_threshold =
+      opts
+      |> Keyword.get(:dirty_threshold, @default_dirty_threshold)
+      |> validate_dirty_threshold!()
+
+    max_input_size =
+      opts
+      |> Keyword.get_lazy(:max_input_size, &configured_max_input_size!/0)
+      |> validate_max_input_size!()
+
+    {dirty_threshold, max_input_size}
+  end
+
+  defp configured_max_input_size! do
+    :encoding_rs
+    |> Application.get_env(:max_input_size, @default_max_input_size)
+    |> validate_max_input_size!()
+  end
+
+  defp validate_dirty_threshold!(value) when is_integer(value) and value >= 0, do: value
+
+  defp validate_dirty_threshold!(value) do
+    raise ArgumentError,
+          "expected :dirty_threshold to be a non-negative integer, got: #{inspect(value)}"
+  end
+
+  defp validate_max_input_size!(:infinity), do: :infinity
+
+  defp validate_max_input_size!(value) when is_integer(value) and value >= 0, do: value
+
+  defp validate_max_input_size!(value) do
+    raise ArgumentError,
+          "expected :max_input_size to be a non-negative integer or :infinity, got: #{inspect(value)}"
   end
 
   defp merge_results(_oversized_indices, _valid_items, _nif_results, 0), do: []

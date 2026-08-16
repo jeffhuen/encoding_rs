@@ -2,10 +2,11 @@
 //!
 //! This is a high-performance implementation based on encoding_rs, the same
 //! encoding library used by Firefox. It provides fast character encoding
-//! conversion for all encodings in the WHATWG Encoding Standard.
+//! decoding for all encodings in the WHATWG Encoding Standard and encoding
+//! for their output encodings.
 //!
 //! Supported encodings include:
-//! - UTF-8, UTF-16LE, UTF-16BE
+//! - UTF-8, plus decode-only UTF-16LE and UTF-16BE
 //! - Windows code pages (1250-1258, 874, 949, 932)
 //! - ISO-8859 family (1-16)
 //! - Asian encodings (Shift_JIS, EUC-JP, EUC-KR, GBK, GB18030, Big5)
@@ -17,9 +18,15 @@
 //! decoder API (`decoder_new`, `decoder_decode_chunk`) which properly handles
 //! characters split across chunk boundaries.
 
+use std::sync::Mutex;
+
 use encoding_rs::Encoding;
 use rustler::{Atom, Binary, Env, NifResult, OwnedBinary, Resource, ResourceArc};
-use std::sync::Mutex;
+
+const ALLOCATION_FAILED: &str = "allocation_failed";
+const ENCODER_UNAVAILABLE: &str = "encoder_unavailable";
+const LOCK_POISONED: &str = "lock_poisoned";
+const UNKNOWN_ENCODING: &str = "unknown_encoding";
 
 mod atoms {
     rustler::atoms! {
@@ -37,13 +44,15 @@ pub struct DecoderResource {
     decoder: Mutex<encoding_rs::Decoder>,
 }
 
+type DecodeResult = (Atom, String, &'static str, bool);
+
 #[rustler::resource_impl]
 impl Resource for DecoderResource {}
 
 /// Decodes a binary from the specified encoding to a UTF-8 string.
 ///
-/// Uses dirty CPU scheduler for binaries larger than 64KB to avoid
-/// blocking the BEAM scheduler.
+/// Runs on a dirty CPU scheduler. The Elixir API selects this entry point when
+/// the input exceeds its configured threshold.
 ///
 /// ## Arguments
 /// * `in_binary` - The binary data to decode
@@ -53,31 +62,51 @@ impl Resource for DecoderResource {}
 /// * `{:ok, string}` on success
 /// * `{:error, :unknown_encoding}` if encoding label is not recognized
 #[rustler::nif(schedule = "DirtyCpu")]
-fn decode_dirty<'a>(env: Env<'a>, in_binary: Binary, enc: &str) -> NifResult<(Atom, String)> {
-    decode_impl(env, in_binary, enc)
+fn decode_dirty(in_binary: Binary, enc: &str) -> NifResult<(Atom, String)> {
+    Ok(decode_impl(in_binary.as_slice(), enc))
 }
 
 #[rustler::nif]
-fn decode_normal<'a>(env: Env<'a>, in_binary: Binary, enc: &str) -> NifResult<(Atom, String)> {
-    decode_impl(env, in_binary, enc)
+fn decode_normal(in_binary: Binary, enc: &str) -> NifResult<(Atom, String)> {
+    Ok(decode_impl(in_binary.as_slice(), enc))
 }
 
-fn decode_impl<'a>(_env: Env<'a>, in_binary: Binary, enc: &str) -> NifResult<(Atom, String)> {
+/// Decodes while also returning the BOM-selected encoding and replacement status.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn decode_with_details_dirty(in_binary: Binary, enc: &str) -> NifResult<DecodeResult> {
+    Ok(decode_with_details_impl(in_binary.as_slice(), enc))
+}
+
+#[rustler::nif]
+fn decode_with_details_normal(in_binary: Binary, enc: &str) -> NifResult<DecodeResult> {
+    Ok(decode_with_details_impl(in_binary.as_slice(), enc))
+}
+
+fn decode_impl(input: &[u8], enc: &str) -> (Atom, String) {
+    let (status, value, _, _) = decode_with_details_impl(input, enc);
+    (status, value)
+}
+
+fn decode_with_details_impl(input: &[u8], enc: &str) -> DecodeResult {
     match Encoding::for_label(enc.as_bytes()) {
         Some(encoding) => {
-            let (decoded, _, _had_errors) = encoding.decode(in_binary.as_slice());
+            let (decoded, actual_encoding, had_errors) = encoding.decode(input);
             // encoding_rs replaces unmappable characters with U+FFFD automatically
-            Ok((atoms::ok(), decoded.into_owned()))
+            (
+                atoms::ok(),
+                decoded.into_owned(),
+                actual_encoding.name(),
+                had_errors,
+            )
         }
-        // Elixir normalize_result/1 discards the string in error tuples
-        None => Ok((atoms::error(), String::new())),
+        None => (atoms::error(), String::new(), "", false),
     }
 }
 
 /// Encodes a UTF-8 string to the specified encoding.
 ///
-/// Uses dirty CPU scheduler for strings larger than 64KB to avoid
-/// blocking the BEAM scheduler.
+/// Runs on a dirty CPU scheduler. The Elixir API selects this entry point when
+/// the input exceeds its configured threshold.
 ///
 /// ## Arguments
 /// * `env` - The Erlang environment
@@ -87,6 +116,7 @@ fn decode_impl<'a>(_env: Env<'a>, in_binary: Binary, enc: &str) -> NifResult<(At
 /// ## Returns
 /// * `{:ok, binary}` on success
 /// * `{:error, :unknown_encoding}` if encoding label is not recognized
+/// * `{:error, :encoder_unavailable}` for decode-only encodings
 #[rustler::nif(schedule = "DirtyCpu")]
 fn encode_dirty<'a>(env: Env<'a>, in_str: &str, enc: &str) -> NifResult<(Atom, Binary<'a>)> {
     encode_impl(env, in_str, enc)
@@ -99,41 +129,39 @@ fn encode_normal<'a>(env: Env<'a>, in_str: &str, enc: &str) -> NifResult<(Atom, 
 
 fn encode_impl<'a>(env: Env<'a>, in_str: &str, enc: &str) -> NifResult<(Atom, Binary<'a>)> {
     match Encoding::for_label(enc.as_bytes()) {
-        Some(encoding) => {
+        Some(encoding) if encoder_available(encoding) => {
             let (encoded, _, _had_errors) = encoding.encode(in_str);
 
             let mut bin = OwnedBinary::new(encoded.len())
-                .ok_or_else(|| rustler::Error::Term(Box::new("allocation_failed")))?;
+                .ok_or_else(|| rustler::Error::Term(Box::new(ALLOCATION_FAILED)))?;
             // copy_from_slice is infallible here: bin was allocated with encoded.len()
             bin.as_mut_slice().copy_from_slice(&encoded);
 
             Ok((atoms::ok(), bin.release(env)))
         }
-        None => {
-            let bin = empty_binary(env)?;
-            Ok((atoms::error(), bin))
-        }
+        Some(_) => encode_error(env, ENCODER_UNAVAILABLE),
+        None => encode_error(env, UNKNOWN_ENCODING),
     }
 }
 
-/// Returns a zero-length BEAM binary for error-path returns.
-///
-/// `enif_alloc_binary(0)` still performs allocator bookkeeping, so this is
-/// not free, but it is the minimal allocation Rustler supports for a
-/// `Binary<'a>` return.
-fn empty_binary<'a>(env: Env<'a>) -> NifResult<Binary<'a>> {
-    let bin =
-        OwnedBinary::new(0).ok_or_else(|| rustler::Error::Term(Box::new("allocation_failed")))?;
-    Ok(bin.release(env))
+fn encoder_available(encoding: &'static Encoding) -> bool {
+    encoding == encoding.output_encoding()
 }
 
-/// Checks if an encoding label is valid/supported.
+fn encode_error<'a>(env: Env<'a>, reason: &'static str) -> NifResult<(Atom, Binary<'a>)> {
+    let mut bin = OwnedBinary::new(reason.len())
+        .ok_or_else(|| rustler::Error::Term(Box::new(ALLOCATION_FAILED)))?;
+    bin.as_mut_slice().copy_from_slice(reason.as_bytes());
+    Ok((atoms::error(), bin.release(env)))
+}
+
+/// Checks if an encoding label is recognized for decoding.
 ///
 /// ## Arguments
 /// * `enc` - The encoding label to check
 ///
 /// ## Returns
-/// * `true` if the encoding is supported
+/// * `true` if the decoding label is recognized
 /// * `false` otherwise
 #[rustler::nif]
 fn encoding_exists(enc: &str) -> bool {
@@ -152,14 +180,14 @@ fn encoding_exists(enc: &str) -> bool {
 fn canonical_name(enc: &str) -> (Atom, &'static str) {
     match Encoding::for_label(enc.as_bytes()) {
         Some(encoding) => (atoms::ok(), encoding.name()),
-        None => (atoms::error(), "unknown_encoding"),
+        None => (atoms::error(), UNKNOWN_ENCODING),
     }
 }
 
-/// Lists all supported encoding names.
+/// Lists all recognized encoding names.
 ///
 /// ## Returns
-/// A list of all canonical encoding names supported by this library.
+/// A list of all canonical decoding names recognized by this library.
 #[rustler::nif]
 fn list_encodings() -> Vec<&'static str> {
     // encoding_rs doesn't expose a list, so we provide the WHATWG standard ones
@@ -216,27 +244,44 @@ fn list_encodings() -> Vec<&'static str> {
 /// This amortizes NIF dispatch overhead when processing many items,
 /// making it more efficient than calling `decode` repeatedly.
 ///
-/// Always uses dirty CPU scheduler since batch operations are typically
-/// used for throughput-focused workloads.
-///
 /// ## Arguments
 /// * `items` - List of `{binary, encoding}` tuples to decode
 ///
 /// ## Returns
 /// List of `{:ok, string}` or `{:error, :unknown_encoding}` tuples,
 /// in the same order as the input.
+#[rustler::nif]
+fn decode_batch_normal(items: Vec<(Binary, &str)>) -> Vec<(Atom, String)> {
+    decode_batch_impl(items)
+}
+
 #[rustler::nif(schedule = "DirtyCpu")]
 fn decode_batch(items: Vec<(Binary, &str)>) -> Vec<(Atom, String)> {
+    decode_batch_impl(items)
+}
+
+fn decode_batch_impl(items: Vec<(Binary, &str)>) -> Vec<(Atom, String)> {
     items
         .into_iter()
-        .map(|(binary, enc)| match Encoding::for_label(enc.as_bytes()) {
-            Some(encoding) => {
-                let (decoded, _, _had_errors) = encoding.decode(binary.as_slice());
-                (atoms::ok(), decoded.into_owned())
-            }
-            // Elixir normalize_result/1 discards the string in error tuples
-            None => (atoms::error(), String::new()),
-        })
+        .map(|(binary, enc)| decode_impl(binary.as_slice(), enc))
+        .collect()
+}
+
+/// Batch decode variant that includes BOM selection and replacement status.
+#[rustler::nif]
+fn decode_batch_with_details_normal(items: Vec<(Binary, &str)>) -> Vec<DecodeResult> {
+    decode_batch_with_details_impl(items)
+}
+
+#[rustler::nif(schedule = "DirtyCpu")]
+fn decode_batch_with_details(items: Vec<(Binary, &str)>) -> Vec<DecodeResult> {
+    decode_batch_with_details_impl(items)
+}
+
+fn decode_batch_with_details_impl(items: Vec<(Binary, &str)>) -> Vec<DecodeResult> {
+    items
+        .into_iter()
+        .map(|(binary, enc)| decode_with_details_impl(binary.as_slice(), enc))
         .collect()
 }
 
@@ -245,33 +290,34 @@ fn decode_batch(items: Vec<(Binary, &str)>) -> Vec<(Atom, String)> {
 /// This amortizes NIF dispatch overhead when processing many items,
 /// making it more efficient than calling `encode` repeatedly.
 ///
-/// Always uses dirty CPU scheduler since batch operations are typically
-/// used for throughput-focused workloads.
-///
 /// ## Arguments
 /// * `env` - The Erlang environment
 /// * `items` - List of `{string, encoding}` tuples to encode
 ///
 /// ## Returns
-/// List of `{:ok, binary}` or `{:error, :unknown_encoding}` tuples,
+/// List of `{:ok, binary}`, `{:error, :unknown_encoding}`, or
+/// `{:error, :encoder_unavailable}` tuples,
 /// in the same order as the input.
+#[rustler::nif]
+fn encode_batch_normal<'a>(
+    env: Env<'a>,
+    items: Vec<(&str, &str)>,
+) -> NifResult<Vec<(Atom, Binary<'a>)>> {
+    encode_batch_impl(env, items)
+}
+
 #[rustler::nif(schedule = "DirtyCpu")]
 fn encode_batch<'a>(env: Env<'a>, items: Vec<(&str, &str)>) -> NifResult<Vec<(Atom, Binary<'a>)>> {
+    encode_batch_impl(env, items)
+}
+
+fn encode_batch_impl<'a>(
+    env: Env<'a>,
+    items: Vec<(&str, &str)>,
+) -> NifResult<Vec<(Atom, Binary<'a>)>> {
     items
         .into_iter()
-        .map(|(in_str, enc)| match Encoding::for_label(enc.as_bytes()) {
-            Some(encoding) => {
-                let (encoded, _, _had_errors) = encoding.encode(in_str);
-                let mut bin = OwnedBinary::new(encoded.len())
-                    .ok_or_else(|| rustler::Error::Term(Box::new("allocation_failed")))?;
-                bin.as_mut_slice().copy_from_slice(&encoded);
-                Ok((atoms::ok(), bin.release(env)))
-            }
-            None => {
-                let bin = empty_binary(env)?;
-                Ok((atoms::error(), bin))
-            }
-        })
+        .map(|(in_str, enc)| encode_impl(env, in_str, enc))
         .collect()
 }
 
@@ -375,18 +421,13 @@ fn decoder_decode_chunk_impl(
 ) -> NifResult<(Atom, String, bool)> {
     let mut decoder = match decoder_ref.decoder.lock() {
         Ok(guard) => guard,
-        Err(_) => return Ok((atoms::error(), String::from("lock_poisoned"), false)),
+        Err(_) => return Ok((atoms::error(), String::from(LOCK_POISONED), false)),
     };
 
     let input = chunk.as_slice();
-
-    // max_utf8_buffer_length is a worst-case estimate (up to 3x input size).
-    // We shrink after decoding to avoid passing oversized buffers through Rustler.
-    let max_output_len = decoder
-        .max_utf8_buffer_length(input.len())
-        .unwrap_or(input.len() * 3 + 3);
-
-    let mut output = String::with_capacity(max_output_len);
+    let Ok(mut output) = allocate_decode_output(&decoder, input.len()) else {
+        return Ok((atoms::error(), String::from(ALLOCATION_FAILED), false));
+    };
     let (_result, _read, had_errors) = decoder.decode_to_string(input, &mut output, is_last);
 
     // Release excess capacity before Rustler copies this into a BEAM binary.
@@ -397,6 +438,45 @@ fn decoder_decode_chunk_impl(
     }
 
     Ok((atoms::ok(), output, had_errors))
+}
+
+fn allocate_decode_output(
+    decoder: &encoding_rs::Decoder,
+    input_len: usize,
+) -> Result<String, &'static str> {
+    let max_output_len = decoder
+        .max_utf8_buffer_length(input_len)
+        .ok_or(ALLOCATION_FAILED)?;
+
+    // Avoid a capacity-overflow panic crossing the NIF boundary.
+    let mut output = String::new();
+    output
+        .try_reserve(max_output_len)
+        .map_err(|_| ALLOCATION_FAILED)?;
+    Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_output_allocation_rejects_overflowing_length() {
+        let decoder = encoding_rs::UTF_8.new_decoder();
+
+        assert_eq!(
+            allocate_decode_output(&decoder, usize::MAX),
+            Err(ALLOCATION_FAILED)
+        );
+    }
+
+    #[test]
+    fn only_output_encodings_have_encoders() {
+        assert!(encoder_available(encoding_rs::UTF_8));
+        assert!(!encoder_available(encoding_rs::UTF_16LE));
+        assert!(!encoder_available(encoding_rs::UTF_16BE));
+        assert!(!encoder_available(encoding_rs::REPLACEMENT));
+    }
 }
 
 rustler::init!("Elixir.EncodingRs.Native");

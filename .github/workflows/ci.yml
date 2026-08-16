@@ -28,9 +28,11 @@ jobs:
             otp: "27"
           - elixir: "1.19"
             otp: "28"
+          - elixir: "1.20"
+            otp: "29"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
@@ -42,21 +44,21 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache deps
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: deps
           key: deps-${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
           restore-keys: deps-${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-
 
       - name: Cache _build
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: _build
           key: build-${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
           restore-keys: build-${{ runner.os }}-${{ matrix.otp }}-${{ matrix.elixir }}-
 
       - name: Cache Rust target
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: native/encoding_rs/target
           key: rust-${{ runner.os }}-${{ hashFiles('native/encoding_rs/Cargo.lock') }}
@@ -78,13 +80,13 @@ jobs:
       ENCODING_RS_BUILD: "true"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: "1.19"
-          otp-version: "28"
+          elixir-version: "1.20"
+          otp-version: "29"
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -92,7 +94,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache deps
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: deps
           key: deps-lint-${{ runner.os }}-${{ hashFiles('**/mix.lock') }}
@@ -103,14 +105,20 @@ jobs:
       - name: Check formatting (Elixir)
         run: mix format --check-formatted
 
+      - name: Credo
+        run: mix credo --strict
+
       - name: Check formatting (Rust)
         run: cargo fmt --manifest-path native/encoding_rs/Cargo.toml -- --check
 
       - name: Clippy (Rust)
-        run: cargo clippy --manifest-path native/encoding_rs/Cargo.toml -- -D warnings
+        run: cargo clippy --manifest-path native/encoding_rs/Cargo.toml --all-targets --all-features --locked -- -D warnings
+
+      - name: Test (Rust)
+        run: cargo test --manifest-path native/encoding_rs/Cargo.toml --all-features --locked
 
       - name: Cache PLTs
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: _build/plts
           key: plts-${{ runner.os }}-${{ hashFiles('mix.lock') }}

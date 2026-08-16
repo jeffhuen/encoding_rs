@@ -53,7 +53,7 @@ jobs:
 
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set project version
         shell: bash
@@ -63,8 +63,9 @@ jobs:
         shell: bash
         run: |
           MIX_VERSION=$(sed -n 's/^  @version "\(.*\)"/\1/p' mix.exs | head -n1)
-          if [ "$MIX_VERSION" != "$PROJECT_VERSION" ]; then
-            echo "::error::Version mismatch! Input: $PROJECT_VERSION, mix.exs: $MIX_VERSION"
+          CARGO_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' native/encoding_rs/Cargo.toml | head -n1)
+          if [ "$MIX_VERSION" != "$PROJECT_VERSION" ] || [ "$CARGO_VERSION" != "$PROJECT_VERSION" ]; then
+            echo "::error::Version mismatch! Input: $PROJECT_VERSION, mix.exs: $MIX_VERSION, Cargo.toml: $CARGO_VERSION"
             exit 1
           fi
           echo "Building version $PROJECT_VERSION"
@@ -77,7 +78,7 @@ jobs:
 
       - name: Build the project
         id: build-crate
-        uses: philss/rustler-precompiled-action@v1.1.4
+        uses: philss/rustler-precompiled-action@v1.1.5
         with:
           project-name: encoding_rs_nif
           project-version: ${{ env.PROJECT_VERSION }}
@@ -87,13 +88,13 @@ jobs:
           project-dir: "native/encoding_rs"
 
       - name: Artifact upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.build-crate.outputs.file-name }}
           path: ${{ steps.build-crate.outputs.file-path }}
 
       - name: Publish to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ env.PROJECT_VERSION }}
           draft: true

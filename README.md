@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/hexpm/l/encoding_rs.svg)](https://github.com/jeffhuen/encoding_rs/blob/main/LICENSE)
 [![Powered by encoding_rs](https://img.shields.io/badge/powered%20by-encoding__rs-orange.svg)](https://crates.io/crates/encoding_rs)
 
-Character encoding and decoding for Elixir. Convert text between UTF-8 and legacy encodings like Shift_JIS, GBK, Big5, EUC-KR, Windows-1252, and more. Supports all 40 encodings from the WHATWG Encoding Standard (with 200+ label aliases).
+Character encoding and decoding for Elixir. Convert text between UTF-8 and legacy encodings like Shift_JIS, GBK, Big5, EUC-KR, Windows-1252, and more. Decodes all 40 encodings from the WHATWG Encoding Standard (with 200+ label aliases) and encodes its output encodings.
 
 Powered by Rust's [encoding_rs](https://crates.io/crates/encoding_rs) - the same encoding library used by Firefox.
 
@@ -18,7 +18,6 @@ Powered by Rust's [encoding_rs](https://crates.io/crates/encoding_rs) - the same
 - **Importing legacy data** - Windows-1252, ISO-8859-1, legacy code pages
 - **Web scraping non-UTF-8 sites** - decode HTML in any encoding
 - **Converting file encodings** - batch convert legacy files to UTF-8
-- **Reading CSV/text with mixed encodings** - detect and decode automatically
 
 ## Supported Encodings
 
@@ -28,7 +27,7 @@ Powered by Rust's [encoding_rs](https://crates.io/crates/encoding_rs) - the same
 
 **Korean**: EUC-KR
 
-**Unicode**: UTF-8, UTF-16LE, UTF-16BE
+**Unicode**: UTF-8; UTF-16LE and UTF-16BE (decode only)
 
 **Western European**: Windows-1252, ISO-8859-1, ISO-8859-15, macintosh
 
@@ -52,6 +51,8 @@ Powered by Rust's [encoding_rs](https://crates.io/crates/encoding_rs) - the same
 
 And more - see the full list at [encoding.spec.whatwg.org](https://encoding.spec.whatwg.org/#names-and-labels).
 
+UTF-16LE, UTF-16BE, and `replacement` are decode-only in the WHATWG standard. Encoding with one of those labels returns `{:error, :encoder_unavailable}` instead of silently emitting UTF-8.
+
 ## Features
 
 - **High performance** - SIMD-optimized Rust NIF, 3-15x faster than alternatives (see [benchmarks](#benchmarks))
@@ -60,17 +61,19 @@ And more - see the full list at [encoding.spec.whatwg.org](https://encoding.spec
 - **BOM detection** - automatically detect UTF-8, UTF-16LE, UTF-16BE from byte order marks
 - **WHATWG compliant** - implements the [Encoding Standard](https://encoding.spec.whatwg.org/) used by browsers
 - **Precompiled binaries** - no Rust toolchain required for common platforms
-- **Dirty schedulers** - configurable threshold for offloading large operations (default 64KB)
+- **Dirty schedulers** - per-call threshold for offloading large operations (default 64KB)
 
 ## Installation
 
 ```elixir
 def deps do
   [
-    {:encoding_rs, "~> 0.2.4"}
+    {:encoding_rs, "~> 0.3.0"}
   ]
 end
 ```
+
+Upgrading from 0.2? See the [0.2 to 0.3 migration guide](guides/migrating-0.2-to-0.3.md).
 
 The module is still named `EncodingRs` for API compatibility with the original package.
 
@@ -87,12 +90,19 @@ For complete binaries where all data is available at once:
 {:ok, string} = EncodingRs.decode(binary, "shift_jis")
 string = EncodingRs.decode!(binary, "shift_jis")
 
+# Observe malformed input and any encoding selected by a BOM
+{:ok, string, actual_encoding, had_errors} =
+  EncodingRs.decode_with_details(binary, "shift_jis")
+
 # Encode from UTF-8 to Windows-1252
 {:ok, binary} = EncodingRs.encode(string, "windows-1252")
 binary = EncodingRs.encode!(string, "windows-1252")
 
-# Check if encoding is supported
+# Check if a decoding label is recognized
 EncodingRs.encoding_exists?("utf-8")  # true
+
+# Check whether the native implementation loaded
+EncodingRs.available?()  # true
 
 # Get canonical name for an alias
 EncodingRs.canonical_name("latin1")  # {:ok, "windows-1252"}
@@ -109,7 +119,8 @@ File.stream!("data.txt", [], 4096)
 |> Enum.join()
 
 # Manual chunked decoding
-{:ok, decoder} = EncodingRs.Decoder.new("shift_jis")
+{:ok, decoder} =
+  EncodingRs.Decoder.new("shift_jis", max_input_size: 256 * 1024)
 {:ok, out1, _errors} = EncodingRs.Decoder.decode_chunk(decoder, chunk1, false)
 {:ok, out2, _errors} = EncodingRs.Decoder.decode_chunk(decoder, chunk2, false)
 {:ok, out3, _errors} = EncodingRs.Decoder.decode_chunk(decoder, final_chunk, true)
@@ -134,6 +145,8 @@ Detect encoding from a Byte Order Mark (BOM) at the start of a file:
 {:ok, decoded} = EncodingRs.decode(data_without_bom, encoding)
 ```
 
+One-shot decoding honors a leading BOM even when it differs from the requested label. Use `EncodingRs.decode_with_details/3` to observe the encoding that was actually selected.
+
 ### Batch Processing
 
 For processing many items efficiently, use batch operations to amortize NIF dispatch overhead:
@@ -157,17 +170,15 @@ See the [Batch Processing Guide](guides/batch.md) for more details.
 
 ## Dirty Schedulers
 
-The BEAM VM has a limited number of normal schedulers, and long-running NIFs can block them, causing latency for other processes. Operations on binaries larger than the configured threshold automatically use dirty CPU schedulers, keeping the normal schedulers available for other work.
+The BEAM VM has a limited number of normal schedulers, and long-running NIFs can block them, causing latency for other processes. Operations on binaries larger than the selected threshold automatically use dirty CPU schedulers, keeping the normal schedulers available for other work.
 
-The default threshold is 64KB. You can configure it in your `config.exs`:
+The default threshold is 64KB. Override it for a specific operation:
 
 ```elixir
-# Using multiplication for readability
-config :encoding_rs, dirty_threshold: 128 * 1024
-
-# Or using Elixir's underscore notation
-config :encoding_rs, dirty_threshold: 131_072
+EncodingRs.decode(data, "shift_jis", dirty_threshold: 128 * 1024)
 ```
+
+Batch operations compare the threshold with the combined size of valid items.
 
 **Increasing the threshold** reduces context switching overhead, which benefits batch processing and throughput-focused workloads. However, larger operations will block normal schedulers longer, potentially causing latency for other processes.
 
@@ -175,21 +186,28 @@ config :encoding_rs, dirty_threshold: 131_072
 
 ## Maximum Input Size
 
-To prevent excessive memory allocation from untrusted or unexpectedly large inputs, encoding and decoding operations enforce a configurable maximum input size. Inputs exceeding this limit return `{:error, :input_too_large}` before reaching the NIF. Batch operations reject oversized items individually — valid items in the same batch still succeed.
+To prevent excessive memory allocation from untrusted or unexpectedly large inputs, encoding and decoding operations enforce a maximum input size. Inputs exceeding this limit return `{:error, :input_too_large}` before reaching the NIF. Batch operations reject oversized items individually — valid items in the same batch still succeed.
 
-The default limit is **100MB**. This is a **runtime** setting — it can be changed in `runtime.exs` or dynamically without recompiling:
+The default limit is **100MB**. Override it explicitly per operation:
 
 ```elixir
 # Increase the limit
-config :encoding_rs, max_input_size: 500 * 1024 * 1024
+EncodingRs.decode(data, "utf-8", max_input_size: 500 * 1024 * 1024)
 
 # Disable entirely (trusted inputs only)
-config :encoding_rs, max_input_size: :infinity
+EncodingRs.decode(data, "utf-8", max_input_size: :infinity)
+
+# Batch and streaming APIs accept the same option
+EncodingRs.decode_batch(items, max_input_size: 10 * 1024 * 1024)
+EncodingRs.Decoder.stream(chunks, "shift_jis", max_input_size: 256 * 1024)
 ```
+
+Existing `config :encoding_rs` values remain supported for compatibility, but
+explicit options are preferred for library-safe configuration.
 
 **Why a size limit?** A single large input can cause up to 3x memory amplification in the NIF (input buffer + output buffer + BEAM binary copy). A 500MB input could transiently allocate over 1.5GB, potentially destabilizing the BEAM node even on a dirty scheduler.
 
-**For large files**, use the streaming decoder (`EncodingRs.Decoder.stream/2`) with bounded chunk sizes instead of loading the entire file into memory. The streaming API is not subject to the input size limit since each chunk is validated independently.
+**For large files**, use the streaming decoder (`EncodingRs.Decoder.stream/3`) with bounded chunk sizes instead of loading the entire file into memory. Each chunk is validated independently.
 
 ## Benchmarks
 
@@ -201,7 +219,6 @@ Comparison against `codepagex` (pure Elixir) and `iconv` (Erlang NIF wrapping li
 | ISO-8859-1 | 10 KB | 9.2 μs | 118 μs (13x) | 130 μs (14x) |
 | ISO-8859-1 | 1 MB | 3.0 ms | 12.6 ms (4x) | 13.1 ms (4x) |
 | Shift_JIS | 10 KB | 13 μs | N/A | 196 μs (15x) |
-| UTF-16LE | 10 KB | 8.1 μs | N/A | 98 μs (12x) |
 
 *Benchmarks on Apple Silicon M1. See [comparison guide](guides/comparison.md) for full methodology, more encodings, and when to use each library.*
 

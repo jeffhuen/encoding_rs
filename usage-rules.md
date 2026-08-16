@@ -12,10 +12,15 @@ Use for complete binaries where all data is available at once.
 ```elixir
 {:ok, string} = EncodingRs.decode(binary, "shift_jis")
 {:ok, binary} = EncodingRs.encode(string, "windows-1252")
+
+# Includes the actual BOM-selected encoding and replacement status
+{:ok, string, actual_encoding, had_errors} =
+  EncodingRs.decode_with_details(binary, "shift_jis")
 ```
 
 ### Batch (`encode_batch/1`, `decode_batch/1`)
-Use when processing many separate items for better throughput. Batch operations always use dirty schedulers.
+Use when processing many separate items for better throughput. Batch operations
+apply the scheduler threshold to their combined valid input size.
 
 ```elixir
 items = [{binary1, "shift_jis"}, {binary2, "gbk"}]
@@ -35,7 +40,7 @@ File.stream!("data.txt", [], 4096)
 
 ## Error Handling
 
-All functions return tagged tuples. Always pattern match on results:
+One-shot and batch functions return tagged tuples. Pattern match on those results:
 
 ```elixir
 case EncodingRs.decode(binary, encoding) do
@@ -44,14 +49,19 @@ case EncodingRs.decode(binary, encoding) do
 end
 ```
 
-Use bang variants (`decode!/2`, `encode!/2`) only when you're certain the encoding is valid.
+Use bang variants (`decode!/3`, `encode!/3`) only when errors should raise. For
+non-raising incremental decoding, use `Decoder.new/2` to store options once,
+then call `Decoder.decode_chunk/3`.
+Use `decode_with_details/3` when malformed input or BOM overrides must not be silent.
 
 ## Encoding Labels
 
 - Use WHATWG encoding labels: `"shift_jis"`, `"gbk"`, `"windows-1252"`, `"utf-8"`
 - Labels are case-insensitive
-- Use `EncodingRs.encoding_exists?/1` to validate user-provided encodings
+- Use `EncodingRs.encoding_exists?/1` to validate user-provided decoding labels
 - Use `EncodingRs.canonical_name/1` to normalize aliases (e.g., `"latin1"` → `"windows-1252"`)
+- UTF-16LE, UTF-16BE, and `replacement` are decode-only; `encode/3` returns
+  `{:error, :encoder_unavailable}` for those labels
 
 ## BOM Handling
 
@@ -66,11 +76,14 @@ case EncodingRs.detect_and_strip_bom(data) do
 end
 ```
 
+One-shot decoding also sniffs and removes a leading BOM automatically. Use
+`decode_with_details/3` to see when the BOM selected a different encoding.
+
 ## Performance Considerations
 
-- Operations on binaries larger than 64KB automatically use dirty schedulers (configurable via `config :encoding_rs, dirty_threshold: bytes`)
-- Batch operations always use dirty schedulers regardless of size
-- For streaming large files, use `EncodingRs.Decoder.stream/2` with reasonable chunk sizes (64KB recommended)
+- Operations on binaries larger than 64KB automatically use dirty schedulers; pass `dirty_threshold: bytes` to override it per operation
+- Batch operations apply the threshold to their combined valid input size
+- For streaming large files, use `EncodingRs.Decoder.stream/3` with reasonable chunk sizes (64KB recommended)
 
 ## Common Mistakes
 
@@ -78,3 +91,4 @@ end
 2. **Not handling `:error` tuples** - Unknown encodings return `{:error, :unknown_encoding}`
 3. **Sharing decoder across processes** - Each `EncodingRs.Decoder` maintains mutable state; create one per process
 4. **Forgetting `is_last: true`** - Always pass `true` for the final chunk to flush buffered bytes
+5. **Encoding to UTF-16** - UTF-16 labels are decode-only; use a UTF-16 encoder when UTF-16 output is required

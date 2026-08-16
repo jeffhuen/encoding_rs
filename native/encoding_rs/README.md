@@ -6,7 +6,7 @@ This crate provides high-performance character encoding/decoding using Rust's [e
 
 ## Features
 
-- **One-shot encoding/decoding**: Convert complete binaries between encodings
+- **One-shot encoding/decoding**: Convert complete binaries using WHATWG encodings (UTF-16 is decode-only)
 - **Streaming decoder**: Stateful decoder for chunked data that properly handles multibyte characters split across chunk boundaries
 - **BOM detection**: Detect UTF-8/UTF-16LE/UTF-16BE byte order marks
 - **Dirty schedulers**: Large operations automatically use dirty CPU schedulers

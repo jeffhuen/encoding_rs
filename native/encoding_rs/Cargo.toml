@@ -1,6 +1,6 @@
 [package]
 name = "encoding_rs_nif"
-version = "0.2.4"
+version = "0.3.0"
 authors = ["Jeff Huen"]
 edition = "2021"
 description = "NIF bindings for EncodingRs Elixir package"
@@ -13,7 +13,7 @@ path = "src/lib.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-rustler = "0.37"
+rustler = "0.38"
 encoding_rs = "0.8"
 
 [features]

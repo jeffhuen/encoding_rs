@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.3.0 (2026-08-16)
+
+### Changed
+
+- Added validated per-operation options while preserving existing arities and application configuration as a compatibility fallback; `Decoder.new/2` stores options once for manual chunk loops, and batches now select schedulers by their combined input size.
+- Added detailed decode results and a non-raising native availability check; clarified BOM and decode-only UTF-16 behavior.
+- Updated Elixir, Rust, and GitHub Actions dependencies; the minimum Elixir version is now 1.15.
+- Added a [0.2 to 0.3 migration guide](guides/migrating-0.2-to-0.3.md).
+
+### Fixed
+
+- Kept no-option calls on the direct scheduler path and resolved stream options once per enumeration.
+- Decode-only labels now return `{:error, :encoder_unavailable}` from encode operations instead of silently emitting UTF-8.
+- Replaced panic-capable streaming output allocation with checked reservation and an `:allocation_failed` error.
+
 ## v0.2.4 (2026-02-16)
 
 ### Improved

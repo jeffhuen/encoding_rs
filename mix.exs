@@ -1,17 +1,16 @@
 defmodule EncodingRs.MixProject do
   use Mix.Project
 
-  @version "0.2.4"
+  @version "0.3.0"
 
   def project do
     [
       app: :encoding_rs,
       version: @version,
-      elixir: "~> 1.12",
-      start_permanent: Mix.env() == :prod,
+      elixir: "~> 1.15",
       deps: deps(),
       description:
-        "High-performance character encoding/decoding for Elixir. Supports all 40 WHATWG encodings with 200+ label aliases (Shift_JIS, GBK, Big5, Windows-1252, ISO-8859, UTF-16, and more). Streaming and batch APIs. Powered by Mozilla's encoding_rs.",
+        "High-performance WHATWG text conversion for Elixir. Decodes all 40 encodings with 200+ aliases and encodes their output encodings. Includes streaming and batch APIs. Powered by Mozilla's encoding_rs.",
       package: package(),
       docs: docs(),
       dialyzer: [
@@ -28,9 +27,9 @@ defmodule EncodingRs.MixProject do
 
   defp deps do
     [
-      {:rustler_precompiled, "~> 0.8"},
-      {:rustler, "~> 0.37", optional: true},
-      {:ex_doc, "~> 0.31", only: :dev, runtime: false},
+      {:rustler_precompiled, "~> 0.9"},
+      {:rustler, "~> 0.38", optional: true},
+      {:ex_doc, "~> 0.40", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false}
     ]
@@ -66,6 +65,7 @@ defmodule EncodingRs.MixProject do
       main: "readme",
       extras: [
         "README.md",
+        "guides/migrating-0.2-to-0.3.md",
         "guides/streaming.md",
         "guides/batch.md",
         "guides/comparison.md",

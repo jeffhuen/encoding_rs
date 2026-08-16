@@ -50,16 +50,6 @@ defmodule BenchHelper do
     ]
   end
 
-  defp character_ranges_for("utf-16le") do
-    # UTF-16 can encode anything in BMP, use broad mix
-    [
-      {32..126, 4},       # ASCII - 40%
-      {192..255, 2},      # Latin-1 - 20%
-      {0x3040..0x309F, 2}, # Hiragana - 20%
-      {0x4E00..0x4FFF, 2}  # CJK subset - 20%
-    ]
-  end
-
   defp character_ranges_for(_), do: character_ranges_for(:mixed)
 
   defp generate_chars(0, _ranges, acc), do: Enum.reverse(acc)
@@ -98,7 +88,6 @@ defmodule BenchHelper do
     case encoding do
       "iso-8859-1" -> :iso_8859_1
       "shift_jis" -> nil
-      "utf-16le" -> nil
       _ -> nil
     end
   end
@@ -132,7 +121,6 @@ defmodule BenchHelper do
     case encoding do
       "iso-8859-1" -> "ISO-8859-1"
       "shift_jis" -> "SHIFT_JIS"
-      "utf-16le" -> "UTF-16LE"
       _ -> String.upcase(encoding)
     end
   end
@@ -171,8 +159,7 @@ input_sizes = %{
 # Using iso-8859-1 instead of windows-1252 for fair comparison (codepagex supports it)
 encodings = [
   {"iso-8859-1", "Western European (Latin-1)"},
-  {"shift_jis", "Japanese multibyte encoding"},
-  {"utf-16le", "UTF-16 Little Endian"}
+  {"shift_jis", "Japanese multibyte encoding"}
 ]
 
 # Generate generic test data for display

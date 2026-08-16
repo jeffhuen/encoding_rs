@@ -20,6 +20,20 @@ defmodule EncodingRs.DecoderTest do
     test "returns error for unknown encoding" do
       assert {:error, :unknown_encoding} = Decoder.new("not-an-encoding")
     end
+
+    test "stores options once for manual chunk loops" do
+      assert {:ok, decoder} =
+               Decoder.new("utf-8", dirty_threshold: 0, max_input_size: 4)
+
+      assert {:error, :input_too_large} = Decoder.decode_chunk(decoder, "hello", true)
+
+      assert {:ok, "hello", false} =
+               Decoder.decode_chunk(decoder, "hello", true, max_input_size: 5)
+
+      assert_raise ArgumentError, ~r/unknown keys/, fn ->
+        Decoder.new("utf-8", dirty_treshold: 0)
+      end
+    end
   end
 
   describe "new!/1" do
@@ -135,11 +149,11 @@ defmodule EncodingRs.DecoderTest do
       assert out1 <> out2 == "あ"
     end
 
-    @tag :slow
     test "rejects oversized chunk" do
       {:ok, decoder} = Decoder.new("utf-8")
-      big = :binary.copy(<<0>>, EncodingRs.max_input_size() + 1)
-      assert {:error, :input_too_large} = Decoder.decode_chunk(decoder, big, true)
+
+      assert {:error, :input_too_large} =
+               Decoder.decode_chunk(decoder, "hello", true, max_input_size: 4)
     end
   end
 
@@ -151,6 +165,19 @@ defmodule EncodingRs.DecoderTest do
   end
 
   describe "stream/2" do
+    test "accepts per-call options without changing output" do
+      assert ["hello"] =
+               ["hello"]
+               |> Decoder.stream("utf-8", dirty_threshold: 0)
+               |> Enum.to_list()
+
+      assert_raise RuntimeError, ~r/input_too_large/, fn ->
+        ["hello"]
+        |> Decoder.stream("utf-8", max_input_size: 4)
+        |> Enum.to_list()
+      end
+    end
+
     test "decodes stream of chunks" do
       # "あいう" in Shift_JIS = <<0x82, 0xA0, 0x82, 0xA2, 0x82, 0xA4>>
       chunks = [<<0x82, 0xA0>>, <<0x82, 0xA2>>, <<0x82, 0xA4>>]
