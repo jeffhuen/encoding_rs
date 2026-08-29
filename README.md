@@ -68,12 +68,13 @@ UTF-16LE, UTF-16BE, and `replacement` are decode-only in the WHATWG standard. En
 ```elixir
 def deps do
   [
-    {:encoding_rs, "~> 0.3.0"}
+    {:encoding_rs, "~> 0.4.0"}
   ]
 end
 ```
 
-Upgrading from 0.2? See the [0.2 to 0.3 migration guide](guides/migrating-0.2-to-0.3.md).
+Upgrading from 0.3? See the [0.3 to 0.4 migration guide](guides/migrating-0.3-to-0.4.md).
+For a 0.2 upgrade, follow the [0.2 to 0.3 guide](guides/migrating-0.2-to-0.3.md) first.
 
 The module is still named `EncodingRs` for API compatibility with the original package.
 
@@ -202,8 +203,8 @@ EncodingRs.decode_batch(items, max_input_size: 10 * 1024 * 1024)
 EncodingRs.Decoder.stream(chunks, "shift_jis", max_input_size: 256 * 1024)
 ```
 
-Existing `config :encoding_rs` values remain supported for compatibility, but
-explicit options are preferred for library-safe configuration.
+Version 0.4 ignores `config :encoding_rs`. Pass limits to the operation or
+decoder that needs them.
 
 **Why a size limit?** A single large input can cause up to 3x memory amplification in the NIF (input buffer + output buffer + BEAM binary copy). A 500MB input could transiently allocate over 1.5GB, potentially destabilizing the BEAM node even on a dirty scheduler.
 

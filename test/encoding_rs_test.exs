@@ -181,7 +181,7 @@ defmodule EncodingRsTest do
       end
     end
 
-    test "keeps application config as a fallback" do
+    test "ignores application configuration" do
       previous = Application.fetch_env(:encoding_rs, :max_input_size)
 
       on_exit(fn ->
@@ -192,7 +192,8 @@ defmodule EncodingRsTest do
       end)
 
       Application.put_env(:encoding_rs, :max_input_size, 4)
-      assert {:error, :input_too_large} = EncodingRs.decode("hello", "utf-8")
+      assert EncodingRs.max_input_size() == 100 * 1024 * 1024
+      assert {:ok, "hello"} = EncodingRs.decode("hello", "utf-8")
       assert {:ok, "hello"} = EncodingRs.decode("hello", "utf-8", max_input_size: 5)
     end
   end

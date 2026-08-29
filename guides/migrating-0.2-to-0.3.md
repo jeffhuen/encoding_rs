@@ -1,5 +1,8 @@
 # Migrating from 0.2 to 0.3
 
+This guide describes version 0.3. To upgrade to 0.4, follow the
+[0.3 to 0.4 guide](migrating-0.3-to-0.4.md) after this one.
+
 Version 0.3 keeps the existing public function arities and success tuples. It
 raises the minimum Elixir version and stops encode operations from accepting
 decode-only labels.

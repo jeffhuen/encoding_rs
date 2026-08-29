@@ -1,6 +1,6 @@
 [package]
 name = "encoding_rs_nif"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Jeff Huen"]
 edition = "2021"
 description = "NIF bindings for EncodingRs Elixir package"
@@ -22,3 +22,10 @@ default = []
 nif_version_2_15 = ["rustler/nif_version_2_15"]
 nif_version_2_16 = ["rustler/nif_version_2_16"]
 nif_version_2_17 = ["rustler/nif_version_2_17"]
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+missing_safety_doc = "deny"
+undocumented_unsafe_blocks = "deny"

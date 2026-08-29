@@ -36,8 +36,7 @@ defmodule EncodingRs do
   > input, prefer the streaming decoder (`EncodingRs.Decoder`) with bounded
   > chunk sizes.
 
-  New code should prefer explicit options. Existing application configuration
-  remains supported as a compatibility fallback.
+  Pass explicit options when an operation needs different limits.
 
   ## Supported Encodings
 
@@ -73,18 +72,9 @@ defmodule EncodingRs do
 
   alias EncodingRs.Native
 
-  @default_dirty_threshold Application.compile_env(
-                             :encoding_rs,
-                             :dirty_threshold,
-                             64 * 1024
-                           )
+  @default_dirty_threshold 64 * 1024
   @default_max_input_size 100 * 1024 * 1024
   @option_keys [:dirty_threshold, :max_input_size]
-
-  unless is_integer(@default_dirty_threshold) and @default_dirty_threshold >= 0 do
-    raise ArgumentError,
-          "expected :dirty_threshold to be a non-negative integer, got: #{inspect(@default_dirty_threshold)}"
-  end
 
   # Types
 
@@ -144,7 +134,7 @@ defmodule EncodingRs do
           {:ok, binary()}
           | {:error, :unknown_encoding | :encoder_unavailable | :input_too_large}
   def encode(string, encoding) when is_binary(string) and is_binary(encoding) do
-    encode_native(string, encoding, @default_dirty_threshold, max_input_size())
+    encode_native(string, encoding, @default_dirty_threshold, @default_max_input_size)
   end
 
   def encode(string, encoding, opts)
@@ -220,7 +210,7 @@ defmodule EncodingRs do
       &Native.decode_normal/2,
       &Native.decode_dirty/2,
       @default_dirty_threshold,
-      max_input_size()
+      @default_max_input_size
     )
     |> normalize_result()
   end
@@ -265,7 +255,7 @@ defmodule EncodingRs do
       &Native.decode_with_details_normal/2,
       &Native.decode_with_details_dirty/2,
       @default_dirty_threshold,
-      max_input_size()
+      @default_max_input_size
     )
     |> normalize_decode_details()
   end
@@ -451,7 +441,7 @@ defmodule EncodingRs do
   """
   @spec max_input_size() :: non_neg_integer() | :infinity
   @spec max_input_size(options()) :: non_neg_integer() | :infinity
-  def max_input_size, do: configured_max_input_size!()
+  def max_input_size, do: @default_max_input_size
 
   def max_input_size(opts) when is_list(opts) do
     {_dirty_threshold, max_input_size} = options!(opts)
@@ -510,7 +500,7 @@ defmodule EncodingRs do
     run_decode_batch(
       items,
       @default_dirty_threshold,
-      max_input_size(),
+      @default_max_input_size,
       &Native.decode_batch_normal/1,
       &Native.decode_batch/1,
       &normalize_result/1
@@ -549,7 +539,7 @@ defmodule EncodingRs do
     run_decode_batch(
       items,
       @default_dirty_threshold,
-      max_input_size(),
+      @default_max_input_size,
       &Native.decode_batch_with_details_normal/1,
       &Native.decode_batch_with_details/1,
       &normalize_decode_details/1
@@ -627,7 +617,7 @@ defmodule EncodingRs do
   @spec encode_batch([encode_batch_item()]) :: [batch_result(binary())]
   @spec encode_batch([encode_batch_item()], options()) :: [batch_result(binary())]
   def encode_batch(items) when is_list(items) do
-    run_encode_batch(items, @default_dirty_threshold, max_input_size())
+    run_encode_batch(items, @default_dirty_threshold, @default_max_input_size)
   end
 
   def encode_batch(items, opts) when is_list(items) and is_list(opts) do
@@ -759,7 +749,7 @@ defmodule EncodingRs do
           "input exceeds maximum size of #{max_input_size_for_error(opts)} bytes"
   end
 
-  defp max_input_size_for_error(:default), do: max_input_size()
+  defp max_input_size_for_error(:default), do: @default_max_input_size
   defp max_input_size_for_error(opts), do: max_input_size(opts)
 
   defp normalize_decode_details({:ok, value, actual_encoding, had_errors}),
@@ -810,16 +800,10 @@ defmodule EncodingRs do
 
     max_input_size =
       opts
-      |> Keyword.get_lazy(:max_input_size, &configured_max_input_size!/0)
+      |> Keyword.get(:max_input_size, @default_max_input_size)
       |> validate_max_input_size!()
 
     {dirty_threshold, max_input_size}
-  end
-
-  defp configured_max_input_size! do
-    :encoding_rs
-    |> Application.get_env(:max_input_size, @default_max_input_size)
-    |> validate_max_input_size!()
   end
 
   defp validate_dirty_threshold!(value) when is_integer(value) and value >= 0, do: value

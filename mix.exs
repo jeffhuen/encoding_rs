@@ -1,7 +1,7 @@
 defmodule EncodingRs.MixProject do
   use Mix.Project
 
-  @version "0.3.0"
+  @version "0.4.0"
 
   def project do
     [
@@ -16,12 +16,6 @@ defmodule EncodingRs.MixProject do
       dialyzer: [
         plt_local_path: "_build/plts"
       ]
-    ]
-  end
-
-  def application do
-    [
-      extra_applications: [:logger]
     ]
   end
 
@@ -65,6 +59,7 @@ defmodule EncodingRs.MixProject do
       main: "readme",
       extras: [
         "README.md",
+        "guides/migrating-0.3-to-0.4.md",
         "guides/migrating-0.2-to-0.3.md",
         "guides/streaming.md",
         "guides/batch.md",

@@ -429,6 +429,7 @@ fn decoder_decode_chunk_impl(
         return Ok((atoms::error(), String::from(ALLOCATION_FAILED), false));
     };
     let (_result, _read, had_errors) = decoder.decode_to_string(input, &mut output, is_last);
+    drop(decoder);
 
     // Release excess capacity before Rustler copies this into a BEAM binary.
     // Skip for small buffers where the realloc overhead outweighs the savings.

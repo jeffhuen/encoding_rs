@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.0 (2026-08-28)
+
+### Changed
+
+- Removed global application configuration. The defaults remain 64KB for dirty scheduler dispatch and 100MB for input size. Pass options to each operation, stream, or decoder when different limits are needed.
+- Removed the unused Logger startup declaration. EncodingRs has no application callback, supervision tree, or shared process state.
+- Released the streaming decoder lock before compacting its output buffer.
+- Added a [0.3 to 0.4 migration guide](guides/migrating-0.3-to-0.4.md).
+
 ## v0.3.0 (2026-08-16)
 
 ### Changed
