@@ -1,6 +1,6 @@
 [package]
 name = "encoding_rs_nif"
-version = "0.4.0"
+version = "0.5.0"
 authors = ["Jeff Huen"]
 edition = "2021"
 description = "NIF bindings for EncodingRs Elixir package"
@@ -14,14 +14,16 @@ crate-type = ["cdylib"]
 
 [dependencies]
 rustler = "0.38"
-encoding_rs = "0.8"
+encoding_rs = { version = "0.8", features = ["fast-legacy-encode"] }
+chardetng = "1.0"
 
 [features]
 default = []
-# NIF version features for rustler_precompiled (OTP 24+ = 2.15, OTP 26 = 2.16, OTP 27+ = 2.17)
+# NIF version features for rustler_precompiled (OTP 22+ = 2.15, OTP 24+ = 2.16, OTP 26+ = 2.17, OTP 29+ = 2.18)
 nif_version_2_15 = ["rustler/nif_version_2_15"]
 nif_version_2_16 = ["rustler/nif_version_2_16"]
 nif_version_2_17 = ["rustler/nif_version_2_17"]
+nif_version_2_18 = ["rustler/nif_version_2_18"]
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

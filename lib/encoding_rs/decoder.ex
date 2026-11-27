@@ -2,55 +2,43 @@ defmodule EncodingRs.Decoder do
   @moduledoc """
   Stateful streaming decoder for converting encoded byte streams to UTF-8.
 
-  This module provides a streaming API for decoding multibyte encodings
-  (like Shift_JIS, GBK, Big5, EUC-JP, etc.) where characters may be split
-  across chunk boundaries.
-
-  ## Why Use Streaming Decoding?
-
-  Multibyte encodings use variable-length byte sequences to represent characters.
-  For example, in Shift_JIS, the character "あ" is encoded as two bytes: `<<0x82, 0xA0>>`.
-
-  When processing data in chunks (e.g., from `File.stream!/1` or network streams),
-  a character's bytes may be split across chunks:
-
-      # Chunk 1 ends with first byte of "あ"
-      chunk1 = <<..., 0x82>>
-      # Chunk 2 starts with second byte of "あ"
-      chunk2 = <<0xA0, ...>>
-
-  The one-shot `EncodingRs.decode/2` treats each chunk independently, so:
-  - Chunk 1's trailing `0x82` is invalid → replaced with `�`
-  - Chunk 2's leading `0xA0` is invalid → replaced with `�`
-
-  The streaming decoder maintains state between chunks, properly buffering
-  incomplete sequences until completed.
+  Use this module when decoding multibyte encodings (such as Shift_JIS, GBK,
+  Big5, EUC-JP, or UTF-16) from chunked sources like `File.stream!/3` or
+  network sockets. Incomplete byte sequences at the end of a chunk stay
+  buffered until the next chunk completes them.
 
   ## Usage
 
-  ### Manual Chunked Decoding
+  ### Stream pipelines
 
-      {:ok, decoder} = EncodingRs.Decoder.new("shift_jis")
+  Use `stream/3` when you want error tuples instead of exceptions, or `stream!/3`
+  for pipelines that expect plain strings and raise on error:
 
-      {:ok, output1, _} = EncodingRs.Decoder.decode_chunk(decoder, chunk1, false)
-      {:ok, output2, _} = EncodingRs.Decoder.decode_chunk(decoder, chunk2, false)
-      {:ok, output3, _} = EncodingRs.Decoder.decode_chunk(decoder, chunk3, true)
-
-      result = output1 <> output2 <> output3
-
-  ### Stream-Based Decoding
-
-      File.stream!("data.txt", [], 4096)
-      |> EncodingRs.Decoder.stream("shift_jis")
+      File.stream!("data.txt", [], 64 * 1024)
+      |> EncodingRs.Decoder.stream!("shift_jis")
       |> Enum.join()
 
-  ## Important Notes
+      File.stream!("data.txt", [], 64 * 1024)
+      |> EncodingRs.Decoder.stream("shift_jis", on_error: :error)
+      |> Enum.reduce_while([], fn
+        {:ok, chunk}, acc -> {:cont, [chunk | acc]}
+        {:error, reason}, _acc -> {:halt, {:error, reason}}
+      end)
 
-  - Always pass `is_last: true` for the final chunk to flush any buffered bytes
-  - The decoder resource is mutable; use one decoder per logical stream and do
-    not share it across concurrent processes. Calls are serialized, but their
-    order determines the decoded output.
-  - For single complete binaries, use `EncodingRs.decode/2` instead (more efficient)
+  ### Manual chunk loops
+
+      {:ok, decoder} = EncodingRs.Decoder.new("shift_jis")
+      {:ok, out1, false} = EncodingRs.Decoder.decode_chunk(decoder, chunk1, false)
+      {:ok, out2, false} = EncodingRs.Decoder.decode_chunk(decoder, chunk2, true)
+      result = out1 <> out2
+
+  ## Important notes
+
+  - Pass `is_last: true` on the final chunk to flush buffered bytes. Calling
+    `decode_chunk/3` after `is_last: true` returns `{:error, :decoder_finished}`.
+  - Each decoder holds mutable state. Use one decoder per stream and avoid
+    sharing it across concurrent processes.
+  - For complete binaries already in memory, prefer `EncodingRs.decode/3`.
   """
 
   alias EncodingRs.Native
@@ -59,42 +47,38 @@ defmodule EncodingRs.Decoder do
   defstruct [:resource, :dirty_threshold, :max_input_size]
 
   @typedoc "An opaque decoder created with `new/1` or `new/2`."
-  @opaque t ::
-            reference()
-            | %__MODULE__{
-                resource: reference(),
-                dirty_threshold: non_neg_integer(),
-                max_input_size: non_neg_integer() | :infinity
-              }
+  @opaque t :: %__MODULE__{
+            resource: reference(),
+            dirty_threshold: non_neg_integer(),
+            max_input_size: non_neg_integer() | :infinity
+          }
 
-  @typedoc "Result of decoding a chunk: `{:ok, decoded_string, had_errors}` or `{:error, reason}`"
-  @type decode_result ::
-          {:ok, String.t(), had_errors :: boolean()}
-          | {:error, :allocation_failed | :lock_poisoned | :input_too_large}
+  @typedoc "Error reasons returned while decoding a chunk."
+  @type chunk_error ::
+          :input_too_large
+          | :malformed_input
+          | :decoder_finished
+          | :allocation_failed
+          | :lock_poisoned
+
+  @typedoc "Error reasons emitted by non-bang decoder streams."
+  @type stream_error :: :unknown_encoding | chunk_error()
+
+  @typedoc "Result of decoding one chunk."
+  @type decode_result :: {:ok, String.t(), had_errors :: boolean()} | {:error, chunk_error()}
 
   @doc """
-  Creates a new stateful decoder for the specified encoding.
+  Creates a stateful decoder for the requested encoding.
 
-  The decoder maintains internal state to handle multibyte characters
-  that may be split across chunk boundaries.
-
-  Pass options to `new/2` for manual chunk loops. They are validated and stored
-  once instead of being resolved again for every `decode_chunk/3` call.
-
-  ## Arguments
-
-  - `encoding` - The source encoding label (e.g., "shift_jis", "gbk", "euc-jp")
-
-  ## Returns
-
-  - `{:ok, decoder}` on success
-  - `{:error, :unknown_encoding}` if the encoding is not recognized
+  Accepts `:dirty_threshold`, `:max_input_size`, `:bom` (`:sniff`, `:strip`,
+  or `:preserve`), and `:on_error` (`:replace` or `:error`). Options passed to
+  `new/2` are validated once and reused for every `decode_chunk/3` call.
 
   ## Examples
 
       iex> {:ok, decoder} = EncodingRs.Decoder.new("shift_jis")
-      iex> is_reference(decoder)
-      true
+      iex> EncodingRs.Decoder.decode_chunk(decoder, <<0x82, 0xA0>>, true)
+      {:ok, "あ", false}
 
       iex> EncodingRs.Decoder.new("invalid-encoding")
       {:error, :unknown_encoding}
@@ -104,20 +88,13 @@ defmodule EncodingRs.Decoder do
       {:error, :input_too_large}
   """
   @spec new(EncodingRs.encoding()) :: {:ok, t()} | {:error, :unknown_encoding}
-  def new(encoding) when is_binary(encoding) do
-    case Native.decoder_new(encoding) do
-      {:ok, decoder} when is_reference(decoder) -> {:ok, decoder}
-      {:error, _} -> {:error, :unknown_encoding}
-    end
-  end
-
-  @spec new(EncodingRs.encoding(), EncodingRs.options()) ::
+  @spec new(EncodingRs.encoding(), EncodingRs.decode_options()) ::
           {:ok, t()} | {:error, :unknown_encoding}
-  def new(encoding, opts) when is_binary(encoding) and is_list(opts) do
-    {dirty_threshold, max_input_size} = EncodingRs.resolve_options(opts)
+  def new(encoding, opts \\ []) when is_binary(encoding) and is_list(opts) do
+    {dirty_threshold, max_input_size, bom, on_error} = EncodingRs.resolve_decode_options(opts)
 
-    case new(encoding) do
-      {:ok, resource} ->
+    case Native.decoder_new(encoding, bom, on_error) do
+      {:ok, resource, _} when is_reference(resource) ->
         {:ok,
          %__MODULE__{
            resource: resource,
@@ -125,33 +102,26 @@ defmodule EncodingRs.Decoder do
            max_input_size: max_input_size
          }}
 
-      error ->
-        error
+      {:error, _, _} ->
+        {:error, :unknown_encoding}
     end
   end
 
   @doc """
-  Creates a new stateful decoder, raising on error.
+  Creates a stateful decoder, raising `ArgumentError` if the encoding is unknown.
 
   ## Examples
 
       iex> decoder = EncodingRs.Decoder.new!("shift_jis")
-      iex> is_reference(decoder)
-      true
+      iex> EncodingRs.Decoder.decode_chunk!(decoder, <<0x82, 0xA0>>, true)
+      {"あ", false}
 
       iex> EncodingRs.Decoder.new!("invalid-encoding")
       ** (ArgumentError) unknown encoding: invalid-encoding
   """
   @spec new!(EncodingRs.encoding()) :: t()
-  def new!(encoding) when is_binary(encoding) do
-    case new(encoding) do
-      {:ok, decoder} -> decoder
-      {:error, :unknown_encoding} -> raise ArgumentError, "unknown encoding: #{encoding}"
-    end
-  end
-
-  @spec new!(EncodingRs.encoding(), EncodingRs.options()) :: t()
-  def new!(encoding, opts) when is_binary(encoding) and is_list(opts) do
+  @spec new!(EncodingRs.encoding(), EncodingRs.decode_options()) :: t()
+  def new!(encoding, opts \\ []) when is_binary(encoding) and is_list(opts) do
     case new(encoding, opts) do
       {:ok, decoder} -> decoder
       {:error, :unknown_encoding} -> raise ArgumentError, "unknown encoding: #{encoding}"
@@ -159,38 +129,36 @@ defmodule EncodingRs.Decoder do
   end
 
   @doc """
-  Decodes a chunk of bytes using the stateful decoder.
+  Returns the decoder's active canonical encoding name.
 
-  This function properly handles multibyte characters split across chunk
-  boundaries by maintaining decoder state between calls.
+  When the decoder uses `bom: :sniff` (default), this value updates after the
+  first chunk if a leading UTF-8 or UTF-16 BOM switches the encoding.
 
-  ## Arguments
+  ## Examples
 
-  - `decoder` - The decoder from `new/1` or `new/2`
-  - `chunk` - The binary chunk to decode
-  - `is_last` - Set to `true` for the final chunk (default: `false`)
+      iex> {:ok, decoder} = EncodingRs.Decoder.new("windows-1252")
+      iex> {:ok, "H", false} = EncodingRs.Decoder.decode_chunk(decoder, <<0xFF, 0xFE, 0x48, 0x00>>, true)
+      iex> EncodingRs.Decoder.encoding(decoder)
+      {:ok, "UTF-16LE"}
+  """
+  @spec encoding(t()) :: {:ok, EncodingRs.encoding()} | {:error, :lock_poisoned}
+  def encoding(%__MODULE__{resource: resource}) do
+    case Native.decoder_encoding(resource) do
+      {:ok, name} -> {:ok, name}
+      {:error, "lock_poisoned"} -> {:error, :lock_poisoned}
+    end
+  end
 
-  ## Returns
+  @doc """
+  Decodes one chunk of bytes using the stateful decoder.
 
-  - `{:ok, output, had_errors}` on success
-    - `output` - The decoded UTF-8 string for this chunk
-    - `had_errors` - `true` if any bytes were replaced with U+FFFD
-  - `{:error, :input_too_large}` if the chunk exceeds the selected maximum input size
-  - `{:error, :allocation_failed}` if an output buffer cannot be allocated
-  - `{:error, :lock_poisoned}` if the internal decoder mutex is poisoned (extremely rare)
-
-  ## Behavior
-
-  - When `is_last` is `false`: Incomplete byte sequences at the end of the
-    chunk are buffered internally and completed with the next chunk.
-  - When `is_last` is `true`: Any remaining incomplete sequences are replaced
-    with U+FFFD (the Unicode replacement character).
-  - Chunks exceeding `:max_input_size` are rejected before reaching the NIF.
+  Pass `is_last: true` on the final chunk to flush buffered bytes. Calling this
+  function again after `is_last: true` (or after a strict-mode error) returns
+  `{:error, :decoder_finished}`.
 
   ## Examples
 
       iex> {:ok, decoder} = EncodingRs.Decoder.new("shift_jis")
-      iex> # Shift_JIS "あ" is <<0x82, 0xA0>> - split across chunks
       iex> {:ok, out1, false} = EncodingRs.Decoder.decode_chunk(decoder, <<0x82>>, false)
       iex> {:ok, out2, false} = EncodingRs.Decoder.decode_chunk(decoder, <<0xA0>>, true)
       iex> out1 <> out2
@@ -213,49 +181,28 @@ defmodule EncodingRs.Decoder do
     decode_chunk_resolved(resource, chunk, is_last, dirty_threshold, max_input_size)
   end
 
-  def decode_chunk(decoder, chunk, is_last)
-      when is_reference(decoder) and is_binary(chunk) and is_boolean(is_last) do
-    decode_chunk_resolved(
-      decoder,
-      chunk,
-      is_last,
-      EncodingRs.dirty_threshold(),
-      EncodingRs.max_input_size()
-    )
-  end
-
   @spec decode_chunk(t(), binary(), boolean(), EncodingRs.options()) :: decode_result()
-  def decode_chunk(decoder, chunk, is_last, opts)
-      when (is_reference(decoder) or is_struct(decoder, __MODULE__)) and is_binary(chunk) and
-             is_boolean(is_last) and is_list(opts) do
+  def decode_chunk(%__MODULE__{resource: resource}, chunk, is_last, opts)
+      when is_binary(chunk) and is_boolean(is_last) and is_list(opts) do
     {dirty_threshold, max_input_size} = EncodingRs.resolve_options(opts)
-
-    decode_chunk_resolved(
-      decoder_resource(decoder),
-      chunk,
-      is_last,
-      dirty_threshold,
-      max_input_size
-    )
+    decode_chunk_resolved(resource, chunk, is_last, dirty_threshold, max_input_size)
   end
 
-  defp decode_chunk_resolved(decoder, chunk, is_last, dirty_threshold, max_input_size) do
+  defp decode_chunk_resolved(resource, chunk, is_last, dirty_threshold, max_input_size) do
     if max_input_size != :infinity and byte_size(chunk) > max_input_size do
       {:error, :input_too_large}
     else
       if byte_size(chunk) > dirty_threshold do
-        Native.decoder_decode_chunk_dirty(decoder, chunk, is_last)
+        Native.decoder_decode_chunk_dirty(resource, chunk, is_last)
       else
-        Native.decoder_decode_chunk(decoder, chunk, is_last)
+        Native.decoder_decode_chunk(resource, chunk, is_last)
       end
       |> normalize_decode_result()
     end
   end
 
   @doc """
-  Decodes a chunk, raising on error.
-
-  See `decode_chunk/3` for details.
+  Decodes one chunk, returning `{output, had_errors}` or raising on error.
 
   ## Examples
 
@@ -267,171 +214,216 @@ defmodule EncodingRs.Decoder do
   @spec decode_chunk!(t(), binary(), boolean()) :: {String.t(), boolean()}
   def decode_chunk!(decoder, chunk, is_last \\ false)
 
-  def decode_chunk!(decoder, chunk, is_last)
-      when (is_reference(decoder) or is_struct(decoder, __MODULE__)) and is_binary(chunk) and
-             is_boolean(is_last) do
+  def decode_chunk!(%__MODULE__{} = decoder, chunk, is_last)
+      when is_binary(chunk) and is_boolean(is_last) do
     decoder
     |> decode_chunk(chunk, is_last)
     |> unwrap_decode_result!()
   end
 
   @spec decode_chunk!(t(), binary(), boolean(), EncodingRs.options()) :: {String.t(), boolean()}
-  def decode_chunk!(decoder, chunk, is_last, opts)
-      when (is_reference(decoder) or is_struct(decoder, __MODULE__)) and is_binary(chunk) and
-             is_boolean(is_last) and is_list(opts) do
+  def decode_chunk!(%__MODULE__{} = decoder, chunk, is_last, opts)
+      when is_binary(chunk) and is_boolean(is_last) and is_list(opts) do
     decoder
     |> decode_chunk(chunk, is_last, opts)
     |> unwrap_decode_result!()
   end
 
   @doc """
-  Creates a stream that decodes chunks from the given encoding to UTF-8.
+  Returns a non-raising stream that decodes binary chunks to tagged UTF-8
+  results.
 
-  This is the recommended way to process streaming data in multibyte encodings.
-  It properly handles characters split across chunk boundaries.
+  Each emitted element is `{:ok, string}` or `{:error, reason}`. If the
+  encoding is unknown, the stream emits one `{:error, :unknown_encoding}` tuple
+  without reading from `chunks`. If a chunk fails (for example
+  `:input_too_large` or `:malformed_input` under `on_error: :error`), the
+  stream emits one `{:error, reason}` tuple and stops. Invalid option keys or
+  values still raise `ArgumentError` immediately.
 
-  ## Arguments
-
-  - `chunks` - An enumerable of binary chunks (e.g., from `File.stream!/3`)
-  - `encoding` - The source encoding label
-
-  ## Returns
-
-  A stream of decoded UTF-8 strings. One element is emitted per input chunk,
-  plus an additional element may be emitted at the end if the decoder has
-  buffered bytes remaining (e.g., an incomplete multibyte sequence that gets
-  flushed as a replacement character).
+  Use `stream!/3` when you want plain strings and exceptions on error.
 
   ## Examples
 
-      # Decode a Shift_JIS file
-      File.stream!("japanese.txt", [], 4096)
-      |> EncodingRs.Decoder.stream("shift_jis")
-      |> Enum.join()
+      iex> [<<0x82>>, <<0xA0>>] |> EncodingRs.Decoder.stream("shift_jis") |> Enum.to_list()
+      [{:ok, ""}, {:ok, "あ"}]
 
-      # Process line by line (after decoding)
-      File.stream!("data.csv", [], 8192)
-      |> EncodingRs.Decoder.stream("gbk")
-      |> Enum.join()
-      |> String.split("\\n")
-
-      # With error tracking
-      File.stream!("data.txt", [], 4096)
-      |> EncodingRs.Decoder.stream_with_errors("windows-1252")
-      |> Enum.reduce({"", false}, fn {chunk, errors}, {acc, had_any} ->
-        {acc <> chunk, had_any or errors}
-      end)
-
-  ## Notes
-
-  - The stream automatically handles the `is_last` flag for the final chunk
-  - The output may contain one more element than the input if buffered bytes
-    are flushed at the end of the stream
-  - For better error visibility, use `stream_with_errors/2`
+      iex> ["hello"] |> EncodingRs.Decoder.stream("not-an-encoding") |> Enum.to_list()
+      [{:error, :unknown_encoding}]
   """
   @spec stream(Enumerable.t(), EncodingRs.encoding()) :: Enumerable.t()
-  @spec stream(Enumerable.t(), EncodingRs.encoding(), EncodingRs.options()) :: Enumerable.t()
-  def stream(chunks, encoding) when is_binary(encoding) do
-    stream_resolved(chunks, encoding, :default)
-  end
-
-  def stream(chunks, encoding, opts) when is_binary(encoding) and is_list(opts) do
-    stream_resolved(chunks, encoding, opts)
-  end
-
-  defp stream_resolved(chunks, encoding, opts) do
-    Stream.transform(
-      chunks,
-      fn ->
-        {dirty_threshold, max_input_size} = stream_options(opts)
-        {new!(encoding), dirty_threshold, max_input_size}
-      end,
-      fn chunk, {decoder, dirty_threshold, max_input_size} = state ->
-        {output, _had_errors} =
-          decode_chunk_resolved!(decoder, chunk, false, dirty_threshold, max_input_size)
-
-        {[output], state}
-      end,
-      fn {decoder, dirty_threshold, max_input_size} = state ->
-        # Flush any remaining buffered bytes
-        {output, _had_errors} =
-          decode_chunk_resolved!(decoder, <<>>, true, dirty_threshold, max_input_size)
-
-        if output == "" do
-          {[], state}
-        else
-          {[output], state}
-        end
-      end,
-      fn _state -> :ok end
-    )
+  @spec stream(Enumerable.t(), EncodingRs.encoding(), EncodingRs.decode_options()) ::
+          Enumerable.t()
+  def stream(chunks, encoding, opts \\ []) when is_binary(encoding) and is_list(opts) do
+    resolved = EncodingRs.resolve_decode_options(opts)
+    non_raising_stream(chunks, encoding, resolved, :plain)
   end
 
   @doc """
-  Creates a stream that decodes chunks, including error information.
+  Returns a stream that decodes binary chunks to UTF-8 strings, raising on error.
 
-  Like `stream/2`, but each element is a tuple `{decoded_string, had_errors}`.
-  A single `Stream.map/2` can inspect the flag and return `decoded_string` when
-  downstream stages should keep receiving plain strings.
+  Emits one string per input chunk, plus one final flush element if buffered
+  bytes remain at the end of the stream.
 
   ## Examples
 
-      File.stream!("data.txt", [], 4096)
-      |> EncodingRs.Decoder.stream_with_errors("shift_jis")
-      |> Enum.each(fn {chunk, had_errors} ->
-        if had_errors, do: Logger.warning("Encountered invalid bytes")
-        IO.write(chunk)
-      end)
+      iex> [<<0x82>>, <<0xA0>>] |> EncodingRs.Decoder.stream!("shift_jis") |> Enum.join()
+      "あ"
+  """
+  @spec stream!(Enumerable.t(), EncodingRs.encoding()) :: Enumerable.t()
+  @spec stream!(Enumerable.t(), EncodingRs.encoding(), EncodingRs.decode_options()) ::
+          Enumerable.t()
+  def stream!(chunks, encoding, opts \\ []) when is_binary(encoding) and is_list(opts) do
+    resolved = EncodingRs.resolve_decode_options(opts)
+    raising_stream(chunks, encoding, resolved, :plain)
+  end
+
+  @doc """
+  Returns a non-raising stream that decodes binary chunks and reports
+  replacement errors.
+
+  Each emitted element is `{:ok, string, had_errors}` or `{:error, reason}`.
+  On error, the stream emits one `{:error, reason}` tuple and stops.
+
+  Use `stream_with_errors!/3` when you want `{string, had_errors}` tuples and
+  exceptions on error.
+
+  ## Examples
+
+      iex> [<<"hello">>, <<0xFF>>] |> EncodingRs.Decoder.stream_with_errors("utf-8") |> Enum.to_list()
+      [{:ok, "hello", false}, {:ok, "\uFFFD", true}]
   """
   @spec stream_with_errors(Enumerable.t(), EncodingRs.encoding()) :: Enumerable.t()
-  @spec stream_with_errors(Enumerable.t(), EncodingRs.encoding(), EncodingRs.options()) ::
+  @spec stream_with_errors(Enumerable.t(), EncodingRs.encoding(), EncodingRs.decode_options()) ::
           Enumerable.t()
-  def stream_with_errors(chunks, encoding) when is_binary(encoding) do
-    stream_with_errors_resolved(chunks, encoding, :default)
-  end
-
-  def stream_with_errors(chunks, encoding, opts)
+  def stream_with_errors(chunks, encoding, opts \\ [])
       when is_binary(encoding) and is_list(opts) do
-    stream_with_errors_resolved(chunks, encoding, opts)
+    resolved = EncodingRs.resolve_decode_options(opts)
+    non_raising_stream(chunks, encoding, resolved, :with_errors)
   end
 
-  defp stream_with_errors_resolved(chunks, encoding, opts) do
+  @doc """
+  Returns a stream that decodes binary chunks to `{string, had_errors}` tuples,
+  raising on error.
+
+  ## Examples
+
+      iex> [<<"hello">>, <<0xFF>>] |> EncodingRs.Decoder.stream_with_errors!("utf-8") |> Enum.to_list()
+      [{"hello", false}, {"\uFFFD", true}]
+  """
+  @spec stream_with_errors!(Enumerable.t(), EncodingRs.encoding()) :: Enumerable.t()
+  @spec stream_with_errors!(Enumerable.t(), EncodingRs.encoding(), EncodingRs.decode_options()) ::
+          Enumerable.t()
+  def stream_with_errors!(chunks, encoding, opts \\ [])
+      when is_binary(encoding) and is_list(opts) do
+    resolved = EncodingRs.resolve_decode_options(opts)
+    raising_stream(chunks, encoding, resolved, :with_errors)
+  end
+
+  # Stream implementations
+
+  defp non_raising_stream(chunks, encoding, opts, mode) do
+    if EncodingRs.encoding_exists?(encoding) do
+      build_non_raising_stream(chunks, encoding, opts, mode)
+    else
+      error_stream(:unknown_encoding)
+    end
+  end
+
+  defp build_non_raising_stream(
+         chunks,
+         encoding,
+         {dirty_threshold, max_input_size, bom, on_error},
+         mode
+       ) do
     Stream.transform(
       chunks,
       fn ->
-        {dirty_threshold, max_input_size} = stream_options(opts)
-        {new!(encoding), dirty_threshold, max_input_size}
+        {:ok, resource, _} = Native.decoder_new(encoding, bom, on_error)
+        {:ok, resource, dirty_threshold, max_input_size}
       end,
-      fn chunk, {decoder, dirty_threshold, max_input_size} = state ->
-        result = decode_chunk_resolved!(decoder, chunk, false, dirty_threshold, max_input_size)
-        {[result], state}
+      fn
+        _chunk, :halted ->
+          {:halt, :halted}
+
+        chunk, {:ok, resource, dt, max} = state ->
+          case decode_chunk_resolved(resource, chunk, false, dt, max) do
+            {:ok, output, had_errors} ->
+              {[wrap_stream_ok(output, had_errors, mode)], state}
+
+            {:error, reason} ->
+              {[{:error, reason}], :halted}
+          end
       end,
-      fn {decoder, dirty_threshold, max_input_size} = state ->
-        result = decode_chunk_resolved!(decoder, <<>>, true, dirty_threshold, max_input_size)
-        {output, _had_errors} = result
+      fn
+        :halted ->
+          {[], :halted}
+
+        {:ok, resource, dt, max} = state ->
+          case decode_chunk_resolved(resource, <<>>, true, dt, max) do
+            {:ok, "", _had_errors} ->
+              {[], state}
+
+            {:ok, output, had_errors} ->
+              {[wrap_stream_ok(output, had_errors, mode)], state}
+
+            {:error, reason} ->
+              {[{:error, reason}], :halted}
+          end
+      end,
+      fn _state -> :ok end
+    )
+  end
+
+  defp error_stream(reason) do
+    Stream.resource(
+      fn -> :emit end,
+      fn
+        :emit -> {[{:error, reason}], :done}
+        :done -> {:halt, :done}
+      end,
+      fn _ -> :ok end
+    )
+  end
+
+  defp raising_stream(chunks, encoding, {dirty_threshold, max_input_size, bom, on_error}, mode) do
+    Stream.transform(
+      chunks,
+      fn ->
+        case Native.decoder_new(encoding, bom, on_error) do
+          {:ok, resource, _} when is_reference(resource) ->
+            {resource, dirty_threshold, max_input_size}
+
+          {:error, _, _} ->
+            raise ArgumentError, "unknown encoding: #{encoding}"
+        end
+      end,
+      fn chunk, {resource, dt, max} = state ->
+        {output, had_errors} = decode_chunk_resolved!(resource, chunk, false, dt, max)
+        {[wrap_raising_ok(output, had_errors, mode)], state}
+      end,
+      fn {resource, dt, max} = state ->
+        {output, had_errors} = decode_chunk_resolved!(resource, <<>>, true, dt, max)
 
         if output == "" do
           {[], state}
         else
-          {[result], state}
+          {[wrap_raising_ok(output, had_errors, mode)], state}
         end
       end,
       fn _state -> :ok end
     )
   end
 
+  defp wrap_stream_ok(output, _had_errors, :plain), do: {:ok, output}
+  defp wrap_stream_ok(output, had_errors, :with_errors), do: {:ok, output, had_errors}
+
+  defp wrap_raising_ok(output, _had_errors, :plain), do: output
+  defp wrap_raising_ok(output, had_errors, :with_errors), do: {output, had_errors}
+
   # Private helpers
 
-  defp decoder_resource(%__MODULE__{resource: resource}), do: resource
-  defp decoder_resource(resource), do: resource
-
-  defp stream_options(:default),
-    do: {EncodingRs.dirty_threshold(), EncodingRs.max_input_size()}
-
-  defp stream_options(opts), do: EncodingRs.resolve_options(opts)
-
-  defp decode_chunk_resolved!(decoder, chunk, is_last, dirty_threshold, max_input_size) do
-    decoder
+  defp decode_chunk_resolved!(resource, chunk, is_last, dirty_threshold, max_input_size) do
+    resource
     |> decode_chunk_resolved(chunk, is_last, dirty_threshold, max_input_size)
     |> unwrap_decode_result!()
   end
@@ -442,6 +434,9 @@ defmodule EncodingRs.Decoder do
     do: raise(RuntimeError, "decoder error: #{reason}")
 
   defp normalize_decode_result({:ok, output, had_errors}), do: {:ok, output, had_errors}
+  defp normalize_decode_result({:error, "malformed_input", _}), do: {:error, :malformed_input}
+  defp normalize_decode_result({:error, "decoder_finished", _}), do: {:error, :decoder_finished}
   defp normalize_decode_result({:error, "allocation_failed", _}), do: {:error, :allocation_failed}
   defp normalize_decode_result({:error, "lock_poisoned", _}), do: {:error, :lock_poisoned}
+  defp normalize_decode_result({:error, reason, _}), do: {:error, reason}
 end

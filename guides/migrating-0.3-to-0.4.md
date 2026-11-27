@@ -1,5 +1,8 @@
 # Migrating from 0.3 to 0.4
 
+This guide describes version 0.4. To upgrade to 0.5, follow the
+[0.4 to 0.5 guide](migrating-0.4-to-0.5.md) after this one.
+
 Version 0.4 removes global application configuration. Public function arities,
 return values, and default limits do not change.
 

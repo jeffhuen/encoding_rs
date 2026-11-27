@@ -1,19 +1,17 @@
 # EncodingRs NIF
 
-Rust NIF (Native Implemented Function) for the EncodingRs Elixir package.
+Rust NIF (Native Implemented Function) for the `encoding_rs` Elixir package.
 
-This crate provides high-performance character encoding/decoding using Rust's [encoding_rs](https://crates.io/crates/encoding_rs) library - the same encoding library used by Firefox.
+This crate provides WHATWG text conversion and heuristic encoding detection powered by Mozilla's [encoding_rs](https://crates.io/crates/encoding_rs) (with `fast-legacy-encode`) and [chardetng](https://crates.io/crates/chardetng) crates.
 
 ## Features
 
-- **One-shot encoding/decoding**: Convert complete binaries using WHATWG encodings (UTF-16 is decode-only)
-- **Streaming decoder**: Stateful decoder for chunked data that properly handles multibyte characters split across chunk boundaries
-- **BOM detection**: Detect UTF-8/UTF-16LE/UTF-16BE byte order marks
-- **Dirty schedulers**: Large operations automatically use dirty CPU schedulers
+- **One-shot and batch conversion**: Decodes all 40 WHATWG encodings and encodes their 37 output encodings with configurable BOM handling (`:sniff`, `:strip`, `:preserve`) and error modes (`:replace`, `:error`).
+- **Streaming decoder and encoder**: Stateful resources that preserve multibyte sequences, split UTF-8 code points, and `ISO-2022-JP` shift state across chunk boundaries.
+- **BOM and heuristic detection**: Detects UTF-8/UTF-16 BOMs and runs `chardetng` one-shot or incrementally.
+- **Dirty schedulers**: Large inputs automatically run on dirty CPU schedulers.
 
 ## Building
-
-The NIF is built automatically with the Elixir project:
 
 ```bash
 # Force build from source
@@ -22,4 +20,4 @@ ENCODING_RS_BUILD=true mix compile
 
 ## Module
 
-The NIF is loaded by `EncodingRs.Native` in the Elixir code.
+Loaded by `EncodingRs.Native`.

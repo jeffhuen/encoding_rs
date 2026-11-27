@@ -1,113 +1,54 @@
-# EncodingRs Usage Rules
+# EncodingRs usage rules
 
 ## Overview
 
-EncodingRs is a character encoding library for converting between UTF-8 and legacy encodings (Shift_JIS, GBK, Windows-1252, etc.). It uses a Rust NIF powered by Mozilla's `encoding_rs` crate.
+`EncodingRs` converts between UTF-8 and all 40 WHATWG encodings (37 output encodings) and detects unlabeled encodings via Rust NIFs powered by Mozilla's `encoding_rs` and `chardetng` crates.
 
-## When to Use Each API
+## Choose the right API
 
-### One-Shot (`encode/2`, `encode/3`, `decode/2`, `decode/3`)
-Use for complete binaries where all data is available at once.
+### One-shot (`EncodingRs`)
+
+Use `decode/2,3`, `decode_with_details/2,3`, `encode/2,3`, `encode_with_details/2,3`, and `detect/1,2` for complete binaries in memory.
 
 ```elixir
 {:ok, string} = EncodingRs.decode(binary, "shift_jis")
-{:ok, binary} = EncodingRs.encode(string, "windows-1252")
-
-# Includes the actual BOM-selected encoding and replacement status
-{:ok, string, actual_encoding, had_errors} =
-  EncodingRs.decode_with_details(binary, "shift_jis")
+{:ok, string, actual_encoding, had_errors} = EncodingRs.decode_with_details(binary, "shift_jis")
+{:ok, bytes, had_errors} = EncodingRs.encode_with_details("🎉", "windows-1252")
+{:ok, encoding} = EncodingRs.detect(unknown_bytes, tld: "jp")
 ```
 
-### Batch (`encode_batch/1`, `encode_batch/2`, `decode_batch/1`, `decode_batch/2`)
-Use when processing many separate items for better throughput. Batch operations
-apply the scheduler threshold to their combined valid input size.
+### Batch (`decode_batch/1,2`, `decode_batch_with_details/1,2`, `encode_batch/1,2`, `encode_batch_with_details/1,2`)
 
-```elixir
-items = [{binary1, "shift_jis"}, {binary2, "gbk"}]
-results = EncodingRs.decode_batch(items)
+Use batch calls for lists of independent items to amortize NIF dispatch overhead. The combined byte size of valid items selects normal or dirty CPU scheduling.
 
-# Includes the actual encoding and replacement status for each result
-detailed_results = EncodingRs.decode_batch_with_details(items)
-```
+### Streaming (`EncodingRs.Decoder`, `EncodingRs.Encoder`, `EncodingRs.Detector`)
 
-### Streaming (`EncodingRs.Decoder`)
-Use for chunked data (file streams, network data) where multibyte characters may be split across chunks.
-Use `stream_with_errors/2` or `stream_with_errors/3` when replacement status
-must be preserved.
+Use streaming modules for files and network streams:
 
-```elixir
-File.stream!("data.txt", [], 4096)
-|> EncodingRs.Decoder.stream("shift_jis")
-|> Enum.join()
-```
+- `Decoder.stream/2,3` and `Encoder.stream/2,3` emit `{:ok, chunk}` or `{:error, reason}` without raising.
+- `Decoder.stream!/2,3` and `Encoder.stream!/2,3` emit plain binaries and raise on error.
+- `Decoder.stream_with_errors/2,3` and `Encoder.stream_with_errors/2,3` emit `{:ok, chunk, had_errors}` or `{:error, reason}`.
+- `Detector.detect_stream/1,2` detects the encoding of a chunked stream.
 
-**Important:** Calling one-shot `decode/2` or `decode/3` separately on each chunk can corrupt
-multibyte characters split across chunk boundaries, producing replacement
-characters (`�`).
+Do not call one-shot `decode/2` or `encode/2` per chunk on streamed data. Multibyte characters and `ISO-2022-JP` shift states break across chunk boundaries.
 
-## Error Handling
+## Error handling and strict mode
 
-One-shot and batch functions return tagged tuples. Pattern match on those results:
+- By default (`on_error: :replace`), decode substitutes `U+FFFD` for malformed bytes and encode substitutes WHATWG HTML decimal numeric character references (such as `&#127881;`) for unmappable characters.
+- Pass `on_error: :error` to fail with `{:error, :malformed_input}` (decode) or `{:error, :unmappable_character}` (encode).
+- Non-bang encode functions return `{:error, :invalid_utf8}` for invalid UTF-8 input. Bang variants raise `ArgumentError`.
+- Decode-only labels (`"utf-16le"`, `"utf-16be"`, `"replacement"`) return `{:error, :encoder_unavailable}` on encode. Use `:unicode.characters_to_binary(str, :utf8, {:utf16, :little})` or `{:utf16, :big}` for UTF-16 output.
+- Calling `Decoder.decode_chunk/3`, `Encoder.encode_chunk/3`, or `Detector.feed/3` after `is_last: true` returns `{:error, :decoder_finished}`, `{:error, :encoder_finished}`, or `{:error, :detector_finished}`.
 
-```elixir
-case EncodingRs.decode(binary, encoding) do
-  {:ok, string} -> process(string)
-  {:error, :unknown_encoding} -> handle_error()
-  {:error, :input_too_large} -> reject_input()
-end
-```
+## BOM control and label helpers
 
-Encode operations can also return `{:error, :encoder_unavailable}` for
-decode-only labels. Incremental decoding can additionally report
-`:allocation_failed` or `:lock_poisoned`.
+- Control decode BOM behavior with `bom: :sniff` (default, overrides encoding on UTF-8 or UTF-16 BOM), `bom: :strip` (removes only a matching BOM), or `bom: :preserve` (keeps `U+FEFF`).
+- Validate decoding labels with `EncodingRs.encoding_exists?/1` and encoding labels with `EncodingRs.can_encode?/1`.
+- Normalize aliases with `EncodingRs.canonical_name/1` and inspect WHATWG output mappings with `EncodingRs.output_encoding/1`.
 
-Use bang variants (`decode!/2`, `decode!/3`, `encode!/2`, and `encode!/3`) only
-when errors should raise. For non-raising incremental decoding, use
-`EncodingRs.Decoder.new/2` to store options once, then call
-`EncodingRs.Decoder.decode_chunk/3`.
-Use `decode_with_details/2` or `decode_with_details/3` when malformed input or
-BOM overrides must not be silent.
+## Performance and safety limits
 
-## Encoding Labels
-
-- Use WHATWG encoding labels: `"shift_jis"`, `"gbk"`, `"windows-1252"`, `"utf-8"`
-- Labels are case-insensitive
-- Use `EncodingRs.encoding_exists?/1` to validate user-provided decoding labels
-- Use `EncodingRs.canonical_name/1` to normalize aliases (e.g., `"latin1"` → `"windows-1252"`)
-- UTF-16LE, UTF-16BE, and `replacement` are decode-only; `encode/2` and `encode/3` return
-  `{:error, :encoder_unavailable}` for those labels
-
-## BOM Handling
-
-For files that may have a Byte Order Mark:
-
-```elixir
-case EncodingRs.detect_and_strip_bom(data) do
-  {:ok, encoding, data_without_bom} ->
-    EncodingRs.decode(data_without_bom, encoding)
-  {:error, :no_bom} ->
-    EncodingRs.decode(data, default_encoding)
-end
-```
-
-One-shot decoding also sniffs and removes a leading BOM automatically. Use
-`decode_with_details/2` or `decode_with_details/3` to see when the BOM selected
-a different encoding.
-
-## Performance Considerations
-
-- Operations on binaries larger than 64KB automatically use dirty schedulers; pass `dirty_threshold: bytes` to override it per operation
-- Batch operations apply the threshold to their combined valid input size
-- Individual inputs, batch items, and chunks are limited to 100MB by default;
-  use `max_input_size: bytes` to lower or raise the limit. Use `:infinity` only
-  for trusted, externally bounded input
-- For streaming large files, use `EncodingRs.Decoder.stream/2` or
-  `EncodingRs.Decoder.stream/3` with reasonable chunk sizes (64KB recommended)
-
-## Common Mistakes
-
-1. **Calling `decode/2` or `decode/3` separately on streamed chunks** - Use `EncodingRs.Decoder` for chunked data
-2. **Not handling `:error` tuples** - Unknown encodings return `{:error, :unknown_encoding}`
-3. **Reusing a decoder across streams** - Decoder state belongs to one byte stream; create one decoder per stream and avoid concurrent calls
-4. **Forgetting the final-chunk flag** - Call `EncodingRs.Decoder.decode_chunk(decoder, chunk, true)` for the final chunk to flush buffered bytes
-5. **Encoding to UTF-16** - UTF-16 labels are decode-only; use a UTF-16 encoder when UTF-16 output is required
+- Default `:dirty_threshold` is 64 KB; default `:max_input_size` is 100 MB. Pass overrides per operation or once on `Decoder.new/2`, `Encoder.new/2`, or `Detector.new/1`.
+- Pass `max_input_size: :infinity` only for trusted inputs bounded by another layer.
+- Do not share a `Decoder`, `Encoder`, or `Detector` across concurrent processes; create one per logical stream.
+- When passing `:tld` to `detect/2` or `Detector.guess/2`, pass a lowercase ASCII label without dots (such as `"jp"` or `"cn"`).

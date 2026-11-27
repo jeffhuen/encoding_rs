@@ -4,20 +4,12 @@ defmodule EncodingRs.DecoderTest do
 
   alias EncodingRs.Decoder
 
-  describe "new/1" do
-    test "creates decoder for valid encoding" do
+  describe "new/1 and new/2" do
+    test "creates decoder for valid encodings and aliases" do
       assert {:ok, decoder} = Decoder.new("shift_jis")
-      assert is_reference(decoder)
-    end
-
-    test "creates decoder for encoding aliases" do
+      assert {:ok, "Shift_JIS"} = Decoder.encoding(decoder)
       assert {:ok, _} = Decoder.new("sjis")
-      assert {:ok, _} = Decoder.new("Shift_JIS")
-      assert {:ok, _} = Decoder.new("utf-8")
       assert {:ok, _} = Decoder.new("UTF-8")
-    end
-
-    test "returns error for unknown encoding" do
       assert {:error, :unknown_encoding} = Decoder.new("not-an-encoding")
     end
 
@@ -34,334 +26,190 @@ defmodule EncodingRs.DecoderTest do
         Decoder.new("utf-8", dirty_treshold: 0)
       end
     end
+
+    test "supports bom modes and encoding/1 inspection" do
+      {:ok, sniff_dec} = Decoder.new("windows-1252", bom: :sniff)
+      assert {:ok, "windows-1252"} = Decoder.encoding(sniff_dec)
+
+      assert {:ok, "H", false} =
+               Decoder.decode_chunk(sniff_dec, <<0xFF, 0xFE, 0x48, 0x00>>, true)
+
+      assert {:ok, "UTF-16LE"} = Decoder.encoding(sniff_dec)
+
+      {:ok, strip_dec} = Decoder.new("windows-1252", bom: :strip)
+
+      assert {:ok, "ÿþH\0", false} =
+               Decoder.decode_chunk(strip_dec, <<0xFF, 0xFE, 0x48, 0x00>>, true)
+
+      assert {:ok, "windows-1252"} = Decoder.encoding(strip_dec)
+
+      {:ok, preserve_dec} = Decoder.new("utf-8", bom: :preserve)
+
+      assert {:ok, "\uFEFFhi", false} =
+               Decoder.decode_chunk(preserve_dec, <<0xEF, 0xBB, 0xBF, "hi">>, true)
+    end
   end
 
-  describe "new!/1" do
-    test "creates decoder for valid encoding" do
+  describe "new!/1 and new!/2" do
+    test "creates decoder or raises on unknown encoding" do
       decoder = Decoder.new!("gbk")
-      assert is_reference(decoder)
-    end
+      assert {:ok, "GBK"} = Decoder.encoding(decoder)
 
-    test "raises for unknown encoding" do
       assert_raise ArgumentError, ~r/unknown encoding/, fn ->
         Decoder.new!("invalid")
       end
     end
   end
 
-  describe "decode_chunk/3" do
-    test "decodes complete single-byte chunk" do
-      {:ok, decoder} = Decoder.new("utf-8")
-      assert {:ok, "hello", false} = Decoder.decode_chunk(decoder, "hello", true)
-    end
-
-    test "decodes complete multibyte chunk" do
-      {:ok, decoder} = Decoder.new("shift_jis")
-      # "あ" in Shift_JIS is <<0x82, 0xA0>>
-      assert {:ok, "あ", false} = Decoder.decode_chunk(decoder, <<0x82, 0xA0>>, true)
-    end
-
-    test "handles split multibyte character - the critical fix" do
-      {:ok, decoder} = Decoder.new("shift_jis")
-
-      # "あ" (<<0x82, 0xA0>>) split across two chunks
-      # First chunk: incomplete character, should buffer it
-      {:ok, output1, false} = Decoder.decode_chunk(decoder, <<0x82>>, false)
-      # Second chunk: completes the character
-      {:ok, output2, false} = Decoder.decode_chunk(decoder, <<0xA0>>, true)
-
-      assert output1 <> output2 == "あ"
-    end
-
-    test "handles multiple split characters" do
-      {:ok, decoder} = Decoder.new("shift_jis")
-
-      # "あい" = <<0x82, 0xA0, 0x82, 0xA2>> in Shift_JIS
-      # Split: <<0x82>> | <<0xA0, 0x82>> | <<0xA2>>
-      {:ok, out1, false} = Decoder.decode_chunk(decoder, <<0x82>>, false)
-      {:ok, out2, false} = Decoder.decode_chunk(decoder, <<0xA0, 0x82>>, false)
-      {:ok, out3, false} = Decoder.decode_chunk(decoder, <<0xA2>>, true)
-
-      assert out1 <> out2 <> out3 == "あい"
-    end
-
-    test "handles mixed ASCII and multibyte split" do
-      {:ok, decoder} = Decoder.new("shift_jis")
-
-      # "Aあ" = <<0x41, 0x82, 0xA0>> in Shift_JIS
-      # Split after ASCII: <<0x41, 0x82>> | <<0xA0>>
-      {:ok, out1, false} = Decoder.decode_chunk(decoder, <<0x41, 0x82>>, false)
-      {:ok, out2, false} = Decoder.decode_chunk(decoder, <<0xA0>>, true)
-
-      assert out1 <> out2 == "Aあ"
-    end
-
-    test "reports errors for invalid bytes" do
-      {:ok, decoder} = Decoder.new("utf-8")
-      # 0xFF is invalid UTF-8
-      {:ok, output, had_errors} = Decoder.decode_chunk(decoder, <<0xFF>>, true)
-      assert had_errors == true
-      assert output == "�"
-    end
-
-    test "flushes incomplete sequence on is_last=true" do
-      {:ok, decoder} = Decoder.new("shift_jis")
-
-      # Incomplete character at end with is_last=true should produce replacement
-      {:ok, output, had_errors} = Decoder.decode_chunk(decoder, <<0x82>>, true)
-      assert had_errors == true
-      assert output == "�"
-    end
-
-    test "handles empty chunk" do
-      {:ok, decoder} = Decoder.new("utf-8")
-      assert {:ok, "", false} = Decoder.decode_chunk(decoder, <<>>, false)
-      assert {:ok, "", false} = Decoder.decode_chunk(decoder, <<>>, true)
-    end
-
-    test "GBK encoding with split character" do
-      {:ok, decoder} = Decoder.new("gbk")
-
-      # "中" in GBK is <<0xD6, 0xD0>>
-      {:ok, out1, false} = Decoder.decode_chunk(decoder, <<0xD6>>, false)
-      {:ok, out2, false} = Decoder.decode_chunk(decoder, <<0xD0>>, true)
-
-      assert out1 <> out2 == "中"
-    end
-
-    test "Big5 encoding with split character" do
-      {:ok, decoder} = Decoder.new("big5")
-
-      # "中" in Big5 is <<0xA4, 0xA4>>
-      {:ok, out1, false} = Decoder.decode_chunk(decoder, <<0xA4>>, false)
-      {:ok, out2, false} = Decoder.decode_chunk(decoder, <<0xA4>>, true)
-
-      assert out1 <> out2 == "中"
-    end
-
-    test "EUC-JP encoding with split character" do
-      {:ok, decoder} = Decoder.new("euc-jp")
-
-      # "あ" in EUC-JP is <<0xA4, 0xA2>>
-      {:ok, out1, false} = Decoder.decode_chunk(decoder, <<0xA4>>, false)
-      {:ok, out2, false} = Decoder.decode_chunk(decoder, <<0xA2>>, true)
-
-      assert out1 <> out2 == "あ"
-    end
-
-    test "rejects oversized chunk" do
-      {:ok, decoder} = Decoder.new("utf-8")
-
-      assert {:error, :input_too_large} =
-               Decoder.decode_chunk(decoder, "hello", true, max_input_size: 4)
-    end
-  end
-
-  describe "decode_chunk!/3" do
-    test "returns tuple without :ok" do
-      decoder = Decoder.new!("utf-8")
-      assert {"hello", false} = Decoder.decode_chunk!(decoder, "hello", true)
-    end
-  end
-
-  describe "stream/2" do
-    test "accepts per-call options without changing output" do
-      assert ["hello"] =
-               ["hello"]
-               |> Decoder.stream("utf-8", dirty_threshold: 0)
-               |> Enum.to_list()
-
-      assert_raise RuntimeError, ~r/input_too_large/, fn ->
-        ["hello"]
-        |> Decoder.stream("utf-8", max_input_size: 4)
-        |> Enum.to_list()
+  describe "decode_chunk/3 and decode_chunk/4" do
+    test "handles split multibyte characters across chunks" do
+      for {enc, chunks, expected} <- [
+            {"shift_jis", [<<0x82>>, <<0xA0>>], "あ"},
+            {"shift_jis", [<<0x41, 0x82>>, <<0xA0>>], "Aあ"},
+            {"gbk", [<<0xD6>>, <<0xD0>>], "中"},
+            {"big5", [<<0xA4>>, <<0xA4>>], "中"},
+            {"euc-jp", [<<0xA4>>, <<0xA2>>], "あ"},
+            {"utf-16le", [<<0x41>>, <<0x00>>], "A"}
+          ] do
+        {:ok, decoder} = Decoder.new(enc)
+        [first, last] = chunks
+        {:ok, out1, false} = Decoder.decode_chunk(decoder, first, false)
+        {:ok, out2, false} = Decoder.decode_chunk(decoder, last, true)
+        assert out1 <> out2 == expected
       end
     end
 
-    test "decodes stream of chunks" do
-      # "あいう" in Shift_JIS = <<0x82, 0xA0, 0x82, 0xA2, 0x82, 0xA4>>
-      chunks = [<<0x82, 0xA0>>, <<0x82, 0xA2>>, <<0x82, 0xA4>>]
-
-      result =
-        chunks
-        |> Decoder.stream("shift_jis")
-        |> Enum.join()
-
-      assert result == "あいう"
+    test "returns {:error, :decoder_finished} instead of panicking after is_last: true" do
+      {:ok, decoder} = Decoder.new("utf-8")
+      assert {:ok, "hi", false} = Decoder.decode_chunk(decoder, "hi", true)
+      assert {:error, :decoder_finished} = Decoder.decode_chunk(decoder, "more", true)
+      assert {:error, :decoder_finished} = Decoder.decode_chunk(decoder, "still", false)
     end
 
-    test "handles split characters in stream" do
-      # "あ" split across chunks
-      chunks = [<<0x82>>, <<0xA0>>]
+    test "strict mode rejects malformed sequences and incomplete trailing bytes" do
+      # 0x80 cannot start a BOM or valid UTF-8 sequence, so it fails immediately
+      {:ok, dec1} = Decoder.new("utf-8", on_error: :error)
+      assert {:error, :malformed_input} = Decoder.decode_chunk(dec1, <<0x80>>, false)
+      assert {:error, :decoder_finished} = Decoder.decode_chunk(dec1, "ok", true)
 
-      result =
-        chunks
-        |> Decoder.stream("shift_jis")
-        |> Enum.join()
+      # Under bom: :sniff, 0xFF alone is buffered as a possible UTF-16LE BOM until EOF or next byte
+      {:ok, dec_bom} = Decoder.new("utf-8", bom: :sniff, on_error: :error)
+      assert {:ok, "", false} = Decoder.decode_chunk(dec_bom, <<0xFF>>, false)
+      assert {:error, :malformed_input} = Decoder.decode_chunk(dec_bom, <<>>, true)
 
-      assert result == "あ"
+      # Under bom: :preserve, 0xFF fails immediately without waiting for a BOM byte
+      {:ok, dec_preserve} = Decoder.new("utf-8", bom: :preserve, on_error: :error)
+      assert {:error, :malformed_input} = Decoder.decode_chunk(dec_preserve, <<0xFF>>, false)
+
+      {:ok, dec2} = Decoder.new("shift_jis", on_error: :error)
+      assert {:ok, "", false} = Decoder.decode_chunk(dec2, <<0x82>>, false)
+      assert {:error, :malformed_input} = Decoder.decode_chunk(dec2, <<>>, true)
     end
 
-    test "handles complex split pattern" do
-      # "ABあいCD" in Shift_JIS
-      # Split in awkward places
-      chunks = [
-        <<0x41, 0x42, 0x82>>,
-        <<0xA0, 0x82>>,
-        <<0xA2, 0x43, 0x44>>
-      ]
-
-      result =
-        chunks
-        |> Decoder.stream("shift_jis")
-        |> Enum.join()
-
-      assert result == "ABあいCD"
-    end
-
-    test "handles empty chunks in stream" do
-      chunks = [<<>>, <<0x82, 0xA0>>, <<>>, <<0x82, 0xA2>>, <<>>]
-
-      result =
-        chunks
-        |> Decoder.stream("shift_jis")
-        |> Enum.join()
-
-      assert result == "あい"
-    end
-
-    test "works with single-byte encodings" do
-      # ISO-8859-1 "café"
-      chunks = [<<99, 97>>, <<102, 233>>]
-
-      result =
-        chunks
-        |> Decoder.stream("iso-8859-1")
-        |> Enum.join()
-
-      assert result == "café"
-    end
-
-    test "handles UTF-16LE with split surrogate" do
-      # UTF-16LE "A" is <<0x41, 0x00>>
-      # Split the 2-byte sequence
-      chunks = [<<0x41>>, <<0x00>>]
-
-      result =
-        chunks
-        |> Decoder.stream("utf-16le")
-        |> Enum.join()
-
-      assert result == "A"
-    end
-
-    test "emits extra flush element for incomplete trailing sequence" do
-      # Input ends with incomplete Shift_JIS lead byte 0x82 (no trailing byte)
-      # The stream should emit an extra element with the replacement character
-      chunks = [<<0x82, 0xA0, 0x82>>]
-
-      elements =
-        chunks
-        |> Decoder.stream("shift_jis")
-        |> Enum.to_list()
-
-      # One element from the chunk, one from the flush
-      assert length(elements) == 2
-      assert Enum.at(elements, 0) == "あ"
-      assert Enum.at(elements, 1) == "�"
-    end
-
-    test "no extra flush element when stream ends cleanly" do
-      chunks = [<<0x82, 0xA0>>]
-
-      elements =
-        chunks
-        |> Decoder.stream("shift_jis")
-        |> Enum.to_list()
-
-      # Only one element, no flush needed
-      assert length(elements) == 1
-      assert Enum.at(elements, 0) == "あ"
+    test "reports errors for invalid bytes in replace mode" do
+      {:ok, decoder} = Decoder.new("utf-8")
+      assert {:ok, "\uFFFD", true} = Decoder.decode_chunk(decoder, <<0xFF>>, true)
     end
   end
 
-  describe "stream_with_errors/2" do
-    test "includes error information" do
-      # Mix of valid and invalid UTF-8
-      chunks = [<<"hello">>, <<0xFF>>, <<"world">>]
+  describe "stream/2 and stream/3 (non-raising)" do
+    test "emits {:ok, chunk} tuples and handles split multibyte characters" do
+      chunks = [<<0x41, 0x42, 0x82>>, <<0xA0, 0x82>>, <<0xA2, 0x43, 0x44>>]
 
-      results =
-        chunks
-        |> Decoder.stream_with_errors("utf-8")
-        |> Enum.to_list()
-
-      assert [{"hello", false}, {"�", true}, {"world", false} | _] = results
+      results = chunks |> Decoder.stream("shift_jis") |> Enum.to_list()
+      assert Enum.all?(results, &match?({:ok, _}, &1))
+      assert Enum.map_join(results, fn {:ok, s} -> s end) == "ABあいCD"
     end
 
-    test "tracks errors across split characters" do
-      chunks = [<<0x82>>, <<0xA0>>]
+    test "emits {:error, :unknown_encoding} without pulling from the upstream stream" do
+      never_pulled = Stream.map([1], fn _ -> raise "upstream should not be enumerated" end)
 
-      results =
-        chunks
-        |> Decoder.stream_with_errors("shift_jis")
-        |> Enum.to_list()
+      assert [{:error, :unknown_encoding}] =
+               never_pulled |> Decoder.stream("not-an-encoding") |> Enum.to_list()
 
-      # First chunk outputs nothing (buffered), second outputs the character
-      # Neither should have errors since it's valid split
-      outputs = Enum.map(results, fn {out, _} -> out end)
-      errors = Enum.map(results, fn {_, err} -> err end)
-
-      assert Enum.join(outputs) == "あ"
-      assert Enum.all?(errors, &(&1 == false))
+      assert [{:error, :unknown_encoding}] =
+               [] |> Decoder.stream("not-an-encoding") |> Enum.to_list()
     end
 
-    test "flush element reports had_errors for incomplete trailing sequence" do
-      # Input ends with incomplete Shift_JIS lead byte
-      chunks = [<<0x82, 0xA0, 0x82>>]
+    test "emits {:error, reason} and halts on oversized chunk or strict malformed input" do
+      assert [{:ok, "ok"}, {:error, :input_too_large}] =
+               ["ok", "too big", "never"]
+               |> Decoder.stream("utf-8", max_input_size: 4)
+               |> Enum.to_list()
 
-      results =
-        chunks
-        |> Decoder.stream_with_errors("shift_jis")
-        |> Enum.to_list()
+      assert [{:ok, "ok"}, {:error, :malformed_input}] =
+               ["ok", <<0xFF>>, "never"]
+               |> Decoder.stream("utf-8", on_error: :error)
+               |> Enum.to_list()
 
-      # Two elements: chunk result + flush result
-      assert length(results) == 2
-      assert {"あ", false} = Enum.at(results, 0)
-      assert {"�", true} = Enum.at(results, 1)
+      # Incomplete trailing multibyte sequence fails during flush in strict mode
+      assert [{:ok, "あ"}, {:error, :malformed_input}] =
+               [<<0x82, 0xA0, 0x82>>]
+               |> Decoder.stream("shift_jis", on_error: :error)
+               |> Enum.to_list()
+    end
+
+    test "emits extra flush element for incomplete trailing sequence in replace mode" do
+      assert [{:ok, "あ"}, {:ok, "\uFFFD"}] =
+               [<<0x82, 0xA0, 0x82>>] |> Decoder.stream("shift_jis") |> Enum.to_list()
+
+      assert [{:ok, "あ"}] =
+               [<<0x82, 0xA0>>] |> Decoder.stream("shift_jis") |> Enum.to_list()
+    end
+
+    test "validates option keys immediately" do
+      assert_raise ArgumentError, ~r/unknown keys/, fn ->
+        Decoder.stream(["hi"], "utf-8", bogus: true)
+      end
     end
   end
 
-  describe "comparison with one-shot decode (demonstrating the bug fix)" do
-    test "one-shot decode corrupts split multibyte characters" do
-      # This demonstrates the bug that streaming fixes
-      chunks = [<<0x82>>, <<0xA0>>]
+  describe "stream!/2 and stream!/3 (raising)" do
+    test "emits plain strings and handles split characters" do
+      assert "あいう" ==
+               [<<0x82, 0xA0>>, <<0x82, 0xA2>>, <<0x82, 0xA4>>]
+               |> Decoder.stream!("shift_jis")
+               |> Enum.join()
 
-      # One-shot decode of each chunk independently (the bug)
-      one_shot_result = Enum.map_join(chunks, &EncodingRs.decode!(&1, "shift_jis"))
-
-      # Streaming decode (the fix)
-      streaming_result =
-        chunks
-        |> Decoder.stream("shift_jis")
-        |> Enum.join()
-
-      # One-shot produces replacement characters (corruption)
-      assert one_shot_result == "��"
-
-      # Streaming produces the correct character
-      assert streaming_result == "あ"
+      assert "あ" == [<<0x82>>, <<0xA0>>] |> Decoder.stream!("shift_jis") |> Enum.join()
     end
 
-    test "one-shot is fine for complete input" do
-      # When input is complete, both approaches work
-      complete_input = <<0x82, 0xA0>>
+    test "raises on unknown encoding, oversized chunk, or strict malformed input" do
+      assert_raise ArgumentError, ~r/unknown encoding/, fn ->
+        ["hi"] |> Decoder.stream!("invalid") |> Enum.to_list()
+      end
 
-      one_shot = EncodingRs.decode!(complete_input, "shift_jis")
-      streaming = [complete_input] |> Decoder.stream("shift_jis") |> Enum.join()
+      assert_raise RuntimeError, ~r/input_too_large/, fn ->
+        ["hello"] |> Decoder.stream!("utf-8", max_input_size: 4) |> Enum.to_list()
+      end
 
-      assert one_shot == "あ"
-      assert streaming == "あ"
-      assert one_shot == streaming
+      assert_raise RuntimeError, ~r/malformed_input/, fn ->
+        [<<0xFF>>] |> Decoder.stream!("utf-8", on_error: :error) |> Enum.to_list()
+      end
+    end
+  end
+
+  describe "stream_with_errors/2,3 and stream_with_errors!/2,3" do
+    test "non-raising stream_with_errors emits {:ok, chunk, had_errors} or {:error, reason}" do
+      assert [{:ok, "あ", false}, {:ok, "\uFFFD", true}] =
+               [<<0x82, 0xA0, 0x82>>]
+               |> Decoder.stream_with_errors("shift_jis")
+               |> Enum.to_list()
+
+      assert [{:error, :unknown_encoding}] =
+               ["hi"] |> Decoder.stream_with_errors("invalid") |> Enum.to_list()
+    end
+
+    test "raising stream_with_errors! emits {chunk, had_errors} tuples" do
+      assert [{"hello", false}, {"\uFFFD", true}, {"world", false}] =
+               [<<"hello">>, <<0xFF>>, <<"world">>]
+               |> Decoder.stream_with_errors!("utf-8")
+               |> Enum.to_list()
+
+      assert [{"あ", false}, {"\uFFFD", true}] =
+               [<<0x82, 0xA0, 0x82>>]
+               |> Decoder.stream_with_errors!("shift_jis")
+               |> Enum.to_list()
     end
   end
 end

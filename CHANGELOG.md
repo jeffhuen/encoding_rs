@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.5.0 (2026-11-26)
+
+### Breaking changes
+
+- Raised the minimum Elixir version to 1.16 to adopt `rustler_precompiled` 0.10.1 (which fixes GitHub release download failures caused by `:httpc`'s 10 KB `max_header_size` limit and adds NIF 2.18 support for Erlang/OTP 29). Source builds (`ENCODING_RS_BUILD=true`) now require Rust `1.88` or newer (required by `encoding_rs` `0.8.40+`).
+- Changed `EncodingRs.Decoder.stream/2,3` and `EncodingRs.Decoder.stream_with_errors/2,3` to emit tagged tuples (`{:ok, chunk}`, `{:ok, chunk, had_errors}`, or `{:error, reason}`) instead of raising mid-stream. Added `EncodingRs.Decoder.stream!/2,3` and `EncodingRs.Decoder.stream_with_errors!/2,3` for raising pipelines.
+- Changed non-bang encode functions (`encode/2,3`, `encode_with_details/2,3`, `encode_batch/1,2`, `encode_batch_with_details/1,2`) to return `{:error, :invalid_utf8}` for non-UTF-8 binaries instead of raising `ArgumentError`. Bang variants (`encode!/2,3`) still raise `ArgumentError`.
+- Unified `EncodingRs.Decoder.new/1` and `new!/1` to return the same opaque `%EncodingRs.Decoder{}` struct as `new/2`, matching `EncodingRs.Encoder` and `EncodingRs.Detector`.
+- Added the [0.4 to 0.5 migration guide](guides/migrating-0.4-to-0.5.md).
+
+### Added
+
+- **Streaming encoder (`EncodingRs.Encoder`)**: Added `new/1,2`, `new!/1,2`, `encode_chunk/2,3,4`, `encode_chunk!/2,3,4`, `stream/2,3`, `stream!/2,3`, `stream_with_errors/2,3`, and `stream_with_errors!/2,3`. Preserves shift state for stateful encodings like `ISO-2022-JP` and buffers UTF-8 code points split across chunk boundaries.
+- **Heuristic encoding detection**: Added `EncodingRs.detect/1,2`, `EncodingRs.detect!/1,2`, and `EncodingRs.Detector` (`new/0,1`, `feed/2,3,4`, `feed!/2,3,4`, `guess/1,2`, `guess!/1,2`, `detect_stream/1,2`, `detect_stream!/1,2`) powered by Mozilla's `chardetng` crate with BOM-first detection and optional `:tld`, `:allow_utf8`, `:allow_iso_2022_jp`, and `:bom` controls.
+- **Encode details and strict error modes**: Added `EncodingRs.encode_with_details/2,3` and `EncodingRs.encode_batch_with_details/1,2` returning `{:ok, binary, had_errors}`. Added `on_error: :replace | :error` to encode, decode, batch, and streaming APIs to reject unmappable characters (`{:error, :unmappable_character}`) or malformed bytes (`{:error, :malformed_input}`).
+- **BOM handling control**: Added `bom: :sniff | :strip | :preserve` to one-shot decode, batch decode, and `EncodingRs.Decoder.new/2`, plus `EncodingRs.Decoder.encoding/1` to inspect the active encoding after BOM sniffing.
+- **Target encoding inspection**: Added `EncodingRs.can_encode?/1`, `EncodingRs.output_encoding/1`, and `EncodingRs.list_output_encodings/0`.
+- **OTP 29 precompiled binaries**: Added NIF version `2.18` alongside `2.15`, `2.16`, and `2.17` (40 precompiled release assets).
+
+### Improved
+
+- **Faster CJK encoding**: Enabled `encoding_rs`'s `fast-legacy-encode` Cargo feature. Release benchmarks on Apple Silicon measured 5.5x to 44x faster CJK encoding (Shift_JIS 72 to 914 MB/s, EUC-JP 72 to 1197 MB/s, GBK 33 to 1212 MB/s, Big5 29 to 1288 MB/s, EUC-KR 154 to 849 MB/s) for an additional ~120 KB gzipped NIF size.
+- **Zero-copy borrowed decode path**: One-shot and batch decode now copy `Cow::Borrowed` ASCII and UTF-8 slices directly into BEAM `OwnedBinary` buffers without allocating an intermediate Rust `String`.
+- **Batch fast path**: `decode_batch/2` and `encode_batch/2` skip `MapSet` and `Map` allocations when no item exceeds `:max_input_size`.
+- **Dependencies**: Updated `rustler_precompiled` to `0.10.1`, `dialyxir` to `1.4.9`, `ex_doc` to `0.40.5`, and Rust `encoding_rs` from `0.8.35` to `0.8.44` (which adds `simdutf8` validation on stable Rust and fixes legacy two-byte and `ISO-2022-JP` streaming boundary bugs).
+
+### Fixed
+
+- Guarded `EncodingRs.Decoder.decode_chunk/3,4` against post-finish calls; calling after `is_last: true` now returns `{:error, :decoder_finished}` instead of panicking in the NIF and poisoning the mutex.
+- Corrected documentation for unmappable encode characters (WHATWG HTML decimal numeric character references such as `&#127881;`), fixed the upstream `encoding_rs` repository link (`hsivonen/encoding_rs`), and documented `:unicode.characters_to_binary/3` for UTF-16 output.
+
 ## v0.4.0 (2026-08-28)
 
 ### Changed
@@ -171,4 +202,4 @@ All encodings from the [WHATWG Encoding Standard](https://encoding.spec.whatwg.o
 ### Acknowledgments
 
 - [excoding](https://github.com/elixir-ecto/excoding) - Original project by Kevin Seidel
-- [encoding_rs](https://github.com/nickel-rs/encoding_rs) - Mozilla's Rust encoding library
+- [encoding_rs](https://github.com/hsivonen/encoding_rs) - Mozilla's Rust encoding library

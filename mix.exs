@@ -1,16 +1,16 @@
 defmodule EncodingRs.MixProject do
   use Mix.Project
 
-  @version "0.4.0"
+  @version "0.5.0"
 
   def project do
     [
       app: :encoding_rs,
       version: @version,
-      elixir: "~> 1.15",
+      elixir: "~> 1.16",
       deps: deps(),
       description:
-        "High-performance WHATWG text conversion for Elixir. Decodes all 40 encodings with 200+ aliases and encodes their output encodings. Includes streaming and batch APIs. Powered by Mozilla's encoding_rs.",
+        "High-performance WHATWG text conversion and encoding detection for Elixir. Decodes all 40 encodings with 200+ aliases, encodes their output encodings, and detects unknown encodings. Includes streaming, strict mode, and batch APIs. Powered by Mozilla's encoding_rs and chardetng.",
       package: package(),
       docs: docs(),
       dialyzer: [
@@ -21,7 +21,7 @@ defmodule EncodingRs.MixProject do
 
   defp deps do
     [
-      {:rustler_precompiled, "~> 0.9"},
+      {:rustler_precompiled, "~> 0.10.1"},
       {:rustler, "~> 0.38", optional: true},
       {:ex_doc, "~> 0.40", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
@@ -59,6 +59,7 @@ defmodule EncodingRs.MixProject do
       main: "readme",
       extras: [
         "README.md",
+        "guides/migrating-0.4-to-0.5.md",
         "guides/migrating-0.3-to-0.4.md",
         "guides/migrating-0.2-to-0.3.md",
         "guides/streaming.md",
@@ -71,7 +72,8 @@ defmodule EncodingRs.MixProject do
       ],
       groups_for_modules: [
         "Core API": [EncodingRs],
-        Streaming: [EncodingRs.Decoder]
+        Streaming: [EncodingRs.Decoder, EncodingRs.Encoder],
+        Detection: [EncodingRs.Detector]
       ]
     ]
   end

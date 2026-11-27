@@ -7,14 +7,15 @@ A comparison of Elixir character encoding libraries: `encoding_rs`, `codepagex`,
 | Feature | encoding_rs | codepagex | iconv |
 |---------|-------------|-----------|-------|
 | Implementation | Rust NIF | Pure Elixir | Erlang NIF (C) |
-| Decoding Support | 40 encodings, 200+ aliases (WHATWG) | ~50 | System-dependent |
-| Streaming API | ✅ Yes | ❌ No | ❌ No |
-| Batch Operations | ✅ Yes | ❌ No | ❌ No |
-| BOM Detection | ✅ Yes | ❌ No | ❌ No |
-| Precompiled Binaries | ✅ Yes | N/A | ❌ No |
-| Native Dependencies | Optional (Rust) | None | Required (libiconv) |
-| WHATWG Compliant | ✅ Yes | ❌ No | ❌ No |
-| Dirty Scheduler Support | ✅ Yes | N/A | ❌ No |
+| Decoding support | 40 encodings, 200+ aliases (WHATWG) | ~50 | System-dependent |
+| Streaming decoder and encoder | Yes | No | No |
+| Batch operations | Yes | No | No |
+| BOM and heuristic detection | Yes (BOM + chardetng) | No | No |
+| Strict and replacing error modes | Yes | Yes | Limited |
+| Precompiled binaries | Yes (NIF 2.15 to 2.18) | N/A | No |
+| Native dependencies | Optional (Rust) | None | Required (libiconv) |
+| WHATWG compliant | Yes | No | No |
+| Dirty scheduler support | Yes | N/A | No |
 
 ## Benchmark Results
 
