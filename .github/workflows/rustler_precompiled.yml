@@ -35,7 +35,7 @@ jobs:
               os: ubuntu-22.04,
               use-cross: true,
             }
-          - { target: aarch64-apple-darwin, os: macos-14 }
+          - { target: aarch64-apple-darwin, os: macos-15 }
           - {
               target: riscv64gc-unknown-linux-gnu,
               os: ubuntu-22.04,
