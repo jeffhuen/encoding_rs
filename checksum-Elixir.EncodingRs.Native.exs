@@ -1,62 +1,82 @@
 %{
-  "encoding_rs_nif-v0.4.0-nif-2.15-x86_64-pc-windows-gnu.dll.tar.gz" =>
-    "sha256:5c206a9e2e42e18c94c4151f914b08a7b87f65964c864eccd1607063a0076669",
-  "encoding_rs_nif-v0.4.0-nif-2.15-x86_64-pc-windows-msvc.dll.tar.gz" =>
-    "sha256:a6c8b85dd0bc4e85c58610cb433b05c8aac21b5d48f1020f6dbdd42fe5c730ae",
-  "encoding_rs_nif-v0.4.0-nif-2.16-x86_64-pc-windows-gnu.dll.tar.gz" =>
-    "sha256:b44cdc757c3c2d056b7ec389b5b5ab26a11ff5a2960124a0c008cfaa69fb43f0",
-  "encoding_rs_nif-v0.4.0-nif-2.16-x86_64-pc-windows-msvc.dll.tar.gz" =>
-    "sha256:c54c2e4fe4d187b87c809180b43c33b474ad36f923836f364a2624a26f1f4922",
-  "encoding_rs_nif-v0.4.0-nif-2.17-x86_64-pc-windows-gnu.dll.tar.gz" =>
-    "sha256:3cd487ef3919d484d4af6582a253242ac3537a0371f075a72486aa9a47f7e34e",
-  "encoding_rs_nif-v0.4.0-nif-2.17-x86_64-pc-windows-msvc.dll.tar.gz" =>
-    "sha256:98cfed33f37bfe7bcfffe2281f9552a7389acc9bd6b1df16ec90ca11ea4ce98a",
-  "libencoding_rs_nif-v0.4.0-nif-2.15-aarch64-apple-darwin.so.tar.gz" =>
-    "sha256:92b0120a24122c05f1458dfa57f350e364d43e2e8f1fb58b282fba5a04b2dac8",
-  "libencoding_rs_nif-v0.4.0-nif-2.15-aarch64-unknown-linux-gnu.so.tar.gz" =>
-    "sha256:a1a0db3a65ad21e0e7c4280d28a221972bdfdf2f18ebcaf6edde9b18c18f5738",
-  "libencoding_rs_nif-v0.4.0-nif-2.15-aarch64-unknown-linux-musl.so.tar.gz" =>
-    "sha256:0681f36bdb48a49d38c5c08116dadba88d32c02c742bb2f557f9b9a8d86509fc",
-  "libencoding_rs_nif-v0.4.0-nif-2.15-arm-unknown-linux-gnueabihf.so.tar.gz" =>
-    "sha256:07cefe14ab7b327cbfd7343a1a4a77a2b1f8e92be73f49f035c39ee0310ccaa4",
-  "libencoding_rs_nif-v0.4.0-nif-2.15-riscv64gc-unknown-linux-gnu.so.tar.gz" =>
-    "sha256:919620fe94b22a0c96dfcf48785b56d189c9e2f3029554e7876adcb1edd2c6df",
-  "libencoding_rs_nif-v0.4.0-nif-2.15-x86_64-apple-darwin.so.tar.gz" =>
-    "sha256:193a953081d0da76af6e99baeabfbfdaf46b44cf866f493ecf99f032b8178a00",
-  "libencoding_rs_nif-v0.4.0-nif-2.15-x86_64-unknown-linux-gnu.so.tar.gz" =>
-    "sha256:9ab40462662a258742e275095cf3d385a227160af4d846ecd52099af159ace6b",
-  "libencoding_rs_nif-v0.4.0-nif-2.15-x86_64-unknown-linux-musl.so.tar.gz" =>
-    "sha256:fadc5bb0544bdc82be77dfc7592d65b7af7a7602fdfba0ee7919a1ed0624ef73",
-  "libencoding_rs_nif-v0.4.0-nif-2.16-aarch64-apple-darwin.so.tar.gz" =>
-    "sha256:3b118aa9756768278d579c72cf98cda3cea354fee3b0066e057ca2b9f2e64e8a",
-  "libencoding_rs_nif-v0.4.0-nif-2.16-aarch64-unknown-linux-gnu.so.tar.gz" =>
-    "sha256:2678a126f310e9ba2234ed5ef20fbf8299b461378991f63b45d4d0a38abb3b5c",
-  "libencoding_rs_nif-v0.4.0-nif-2.16-aarch64-unknown-linux-musl.so.tar.gz" =>
-    "sha256:a6dfc981f6434536cdaa5ec5c8bf183fe3ad06ebd2946d1b9a07788d1b363f5f",
-  "libencoding_rs_nif-v0.4.0-nif-2.16-arm-unknown-linux-gnueabihf.so.tar.gz" =>
-    "sha256:9ca0a9b5eafdaef47cba9a0c2b2f76f7db818e07587e9cae7a50f4af2ae88839",
-  "libencoding_rs_nif-v0.4.0-nif-2.16-riscv64gc-unknown-linux-gnu.so.tar.gz" =>
-    "sha256:713e011396fe825c2ef87744a9198b211d8e7371683a7ad6cc60fd4e3cf6e096",
-  "libencoding_rs_nif-v0.4.0-nif-2.16-x86_64-apple-darwin.so.tar.gz" =>
-    "sha256:8d8c2535ae8102c8798b89ee526dbea0d0fa2bba62e19dcb4e2a871409753880",
-  "libencoding_rs_nif-v0.4.0-nif-2.16-x86_64-unknown-linux-gnu.so.tar.gz" =>
-    "sha256:83f72cb8f38bc9acae042d7982342cd8694c41b37fd5a29cc6ec45bc69f78a05",
-  "libencoding_rs_nif-v0.4.0-nif-2.16-x86_64-unknown-linux-musl.so.tar.gz" =>
-    "sha256:9e3a2f113f349cd2392fe4cee513bd5bcc0c95338487c04c2edf4e16a9ad0ba6",
-  "libencoding_rs_nif-v0.4.0-nif-2.17-aarch64-apple-darwin.so.tar.gz" =>
-    "sha256:bf5b298c0beb125845a1b378ac8eb7c14ccf8bc381fd588449ab106f8636ce78",
-  "libencoding_rs_nif-v0.4.0-nif-2.17-aarch64-unknown-linux-gnu.so.tar.gz" =>
-    "sha256:2a7ed900a241da416d421a77ff6552baf1c6eda4a44840686309efbed912bc63",
-  "libencoding_rs_nif-v0.4.0-nif-2.17-aarch64-unknown-linux-musl.so.tar.gz" =>
-    "sha256:72ef7eface3f5afdffc1a2c9efb93fa7775ec78ae07aeb6f4ef7ce8ee5706ab5",
-  "libencoding_rs_nif-v0.4.0-nif-2.17-arm-unknown-linux-gnueabihf.so.tar.gz" =>
-    "sha256:48b1064f7b233e19967962553c44a2b559f09717734d55b02222a02659c444c1",
-  "libencoding_rs_nif-v0.4.0-nif-2.17-riscv64gc-unknown-linux-gnu.so.tar.gz" =>
-    "sha256:0b3f8e4c036b51161e51b19b36187ee67efefec63539ba5fbd06874671e934a9",
-  "libencoding_rs_nif-v0.4.0-nif-2.17-x86_64-apple-darwin.so.tar.gz" =>
-    "sha256:43aa9cf5dad321f6ad93fa5f7075eb33731ea0e62a076093ea9c671fce64e45a",
-  "libencoding_rs_nif-v0.4.0-nif-2.17-x86_64-unknown-linux-gnu.so.tar.gz" =>
-    "sha256:125f6a0500de25ec2e9f4b8a9833e5308026e29618f8cde908c55b4325bc99e4",
-  "libencoding_rs_nif-v0.4.0-nif-2.17-x86_64-unknown-linux-musl.so.tar.gz" =>
-    "sha256:188527eb77fcd5c21696a57aa4de7f872057af68c62cd6d297de6d529ca3750c"
+  "encoding_rs_nif-v0.5.0-nif-2.15-x86_64-pc-windows-gnu.dll.tar.gz" =>
+    "sha256:6d7d2de5f38f3ea25850a9cfd14bdf703fa3bcb94b6cf919cc3910373f2af069",
+  "encoding_rs_nif-v0.5.0-nif-2.15-x86_64-pc-windows-msvc.dll.tar.gz" =>
+    "sha256:81de94eabb1935445842327574f0f4d21308e7510666619ccf348c9a2fd4c95d",
+  "encoding_rs_nif-v0.5.0-nif-2.16-x86_64-pc-windows-gnu.dll.tar.gz" =>
+    "sha256:eba5955c63ea1fb9bfa02577c2a260953e799b43d30fe19220e8cb67d232d841",
+  "encoding_rs_nif-v0.5.0-nif-2.16-x86_64-pc-windows-msvc.dll.tar.gz" =>
+    "sha256:6223d49c15970af8ca6d276d4d29d99e625278adc329c78908ef2e09a586edac",
+  "encoding_rs_nif-v0.5.0-nif-2.17-x86_64-pc-windows-gnu.dll.tar.gz" =>
+    "sha256:e819587c7cf4405908ea84f7a7874efc479894c4fd7b150badb0e005ec074b6f",
+  "encoding_rs_nif-v0.5.0-nif-2.17-x86_64-pc-windows-msvc.dll.tar.gz" =>
+    "sha256:b24cd6d75ac7f8914b0a1115bf1cf1cb945bd6426702a496c7000ce168061912",
+  "encoding_rs_nif-v0.5.0-nif-2.18-x86_64-pc-windows-gnu.dll.tar.gz" =>
+    "sha256:fed2bb00c39f8f05c6c40192b5260dfb56716106e9e855318e8325f0340082cd",
+  "encoding_rs_nif-v0.5.0-nif-2.18-x86_64-pc-windows-msvc.dll.tar.gz" =>
+    "sha256:ad9de82a992c35826275002b9472d94ff98d4384221e4edc465b2ad42603ca28",
+  "libencoding_rs_nif-v0.5.0-nif-2.15-aarch64-apple-darwin.so.tar.gz" =>
+    "sha256:a7f1316efc2b5649d7e57dd8eb0f3e3eb4812f35340b617f64f497d003d6e937",
+  "libencoding_rs_nif-v0.5.0-nif-2.15-aarch64-unknown-linux-gnu.so.tar.gz" =>
+    "sha256:b0c6fef1b7f7d26f805619dfe525abbfcddae94d8e96ed915a2df5404d8c77ed",
+  "libencoding_rs_nif-v0.5.0-nif-2.15-aarch64-unknown-linux-musl.so.tar.gz" =>
+    "sha256:7cf44eb362c29c4dd4c79a3973f9cf6b1d9093e2baa5c04af358fa508951ad19",
+  "libencoding_rs_nif-v0.5.0-nif-2.15-arm-unknown-linux-gnueabihf.so.tar.gz" =>
+    "sha256:a3e78517c47f35d232255041fe56f7f2d82a6df67795a5e0ec1cbec3d16d48ff",
+  "libencoding_rs_nif-v0.5.0-nif-2.15-riscv64gc-unknown-linux-gnu.so.tar.gz" =>
+    "sha256:cae0527626c417d76b583b2c0a3c2f2335b4594ea500c39d80d204dd06d0e103",
+  "libencoding_rs_nif-v0.5.0-nif-2.15-x86_64-apple-darwin.so.tar.gz" =>
+    "sha256:9d727b598fa12ad24e227a07e6a31b048a7fd5934e6c7cdd3113d77121f87023",
+  "libencoding_rs_nif-v0.5.0-nif-2.15-x86_64-unknown-linux-gnu.so.tar.gz" =>
+    "sha256:4a8c038d0a53e8215b500c0c72cd2f4b3d4a890ccc6dbca5c53af7037ab54506",
+  "libencoding_rs_nif-v0.5.0-nif-2.15-x86_64-unknown-linux-musl.so.tar.gz" =>
+    "sha256:cf8d8539d4e419bae78ffd855af15ae807ba8228fd45d09e9ac7c36f257cb6f1",
+  "libencoding_rs_nif-v0.5.0-nif-2.16-aarch64-apple-darwin.so.tar.gz" =>
+    "sha256:e70cee17fa1c8103a9fb87d3c029ab4b427e23ea39f70ceee9dee038858b4b5f",
+  "libencoding_rs_nif-v0.5.0-nif-2.16-aarch64-unknown-linux-gnu.so.tar.gz" =>
+    "sha256:328097d45038a4a1f406f5b137616f1e5373f24e7a9bb217fdec98c74ab09f73",
+  "libencoding_rs_nif-v0.5.0-nif-2.16-aarch64-unknown-linux-musl.so.tar.gz" =>
+    "sha256:b5f4286ad9715bf2d1e06b796d3f21de0e693cf01c1132e8a2332b4947ccff47",
+  "libencoding_rs_nif-v0.5.0-nif-2.16-arm-unknown-linux-gnueabihf.so.tar.gz" =>
+    "sha256:d14f19c0e4a25db93008f9e24e294ffe28993687433607d9f2d7e89239a19b6b",
+  "libencoding_rs_nif-v0.5.0-nif-2.16-riscv64gc-unknown-linux-gnu.so.tar.gz" =>
+    "sha256:c9c58f6c6c444279e8c9524719b44d09abcfc34cbf03b34d46e9a37fb0f80c96",
+  "libencoding_rs_nif-v0.5.0-nif-2.16-x86_64-apple-darwin.so.tar.gz" =>
+    "sha256:a9ad44bd8537bf749757f237ec4be6a19495da70ad5517b1a075df93f8332416",
+  "libencoding_rs_nif-v0.5.0-nif-2.16-x86_64-unknown-linux-gnu.so.tar.gz" =>
+    "sha256:6b713a0ca01f2ac8b63d09ce230c30dc717054996c54f1ac3b4721a6ab2d1205",
+  "libencoding_rs_nif-v0.5.0-nif-2.16-x86_64-unknown-linux-musl.so.tar.gz" =>
+    "sha256:15e196940bf1bc5ddd2af1fb622890a964a2aeffe39fd332944de7c7b82acd06",
+  "libencoding_rs_nif-v0.5.0-nif-2.17-aarch64-apple-darwin.so.tar.gz" =>
+    "sha256:86de27c31a64ae50c6de542393401a9d208df872d346f71c518189b47eb949f7",
+  "libencoding_rs_nif-v0.5.0-nif-2.17-aarch64-unknown-linux-gnu.so.tar.gz" =>
+    "sha256:58ba239f872ca76e3b5a1cd416cec8a316e1c4acdbd26374c40277de4266e291",
+  "libencoding_rs_nif-v0.5.0-nif-2.17-aarch64-unknown-linux-musl.so.tar.gz" =>
+    "sha256:63f634b21406fc44c1e02c8243665e60923c0109b8df93ae8b4ab2dbaf6fa748",
+  "libencoding_rs_nif-v0.5.0-nif-2.17-arm-unknown-linux-gnueabihf.so.tar.gz" =>
+    "sha256:47b317ad8e8b63d5f7caacceeecac62bbf85ed29cbdf94e89ead225b3193b922",
+  "libencoding_rs_nif-v0.5.0-nif-2.17-riscv64gc-unknown-linux-gnu.so.tar.gz" =>
+    "sha256:8ffddcba1293b1d18867c1626e7d6f5b42e63b5f80dfb50f1b88f029c264194c",
+  "libencoding_rs_nif-v0.5.0-nif-2.17-x86_64-apple-darwin.so.tar.gz" =>
+    "sha256:6e8c5ab858b0267571c8b0aefbdfc4f9be00e369ae1d1f30c8da27e92707f07e",
+  "libencoding_rs_nif-v0.5.0-nif-2.17-x86_64-unknown-linux-gnu.so.tar.gz" =>
+    "sha256:8508d3b21957363fd5014786ffc3687bc6eb6379d0a9e96801edd682db1025ca",
+  "libencoding_rs_nif-v0.5.0-nif-2.17-x86_64-unknown-linux-musl.so.tar.gz" =>
+    "sha256:3c42a3d9b024c3ac4ad452efa9dcbdab69f376e7b6b4cbeaa9b791b0b7b40347",
+  "libencoding_rs_nif-v0.5.0-nif-2.18-aarch64-apple-darwin.so.tar.gz" =>
+    "sha256:0e101a0662226d7c5305ae0e534b835c934c208af493cc3e57c630c1c9f7f3dc",
+  "libencoding_rs_nif-v0.5.0-nif-2.18-aarch64-unknown-linux-gnu.so.tar.gz" =>
+    "sha256:73e8e00d0c0be732cab8119273e02e32e97893d80ee988ce504ed397774dcaf2",
+  "libencoding_rs_nif-v0.5.0-nif-2.18-aarch64-unknown-linux-musl.so.tar.gz" =>
+    "sha256:4927bc7d4aea267f77ffad977c05848222750c833816c2083897b4727b551c93",
+  "libencoding_rs_nif-v0.5.0-nif-2.18-arm-unknown-linux-gnueabihf.so.tar.gz" =>
+    "sha256:533c7101745ab7d1f39647b51bd9eadf8e09ccd6de303cb0a06fc67d7b20f7b3",
+  "libencoding_rs_nif-v0.5.0-nif-2.18-riscv64gc-unknown-linux-gnu.so.tar.gz" =>
+    "sha256:3b9d609e89553451076a9ccfbae5a8cb008ce11f59751ba2e3fdf3c73a142e27",
+  "libencoding_rs_nif-v0.5.0-nif-2.18-x86_64-apple-darwin.so.tar.gz" =>
+    "sha256:7b69650ec0714a42333b602c26319dd7898ad76166acb9fa8dbc4a92384b545e",
+  "libencoding_rs_nif-v0.5.0-nif-2.18-x86_64-unknown-linux-gnu.so.tar.gz" =>
+    "sha256:e9b6e6b6998d9b90c26050afcf63e133e0e4862b74e247695e11c3cd8397b333",
+  "libencoding_rs_nif-v0.5.0-nif-2.18-x86_64-unknown-linux-musl.so.tar.gz" =>
+    "sha256:8424c16a4fa3db83b623e7c1a7abe6b2291087645f614b522175c808a71a3ab2"
 }
